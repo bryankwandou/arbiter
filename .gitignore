@@ -23,6 +23,8 @@ storage/*.db
 storage/*.sqlite
 storage/*.parquet
 storage/**/*.parquet
+storage/*.jsonl
+storage/*.html
 *.log
 logs/
 

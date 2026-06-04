@@ -17,13 +17,43 @@ risk:
   max_per_market_pct: 0.05      # maks 5% modal per market
   max_open_positions: 5
   daily_loss_limit_pct: 0.10    # kill-switch: stop kalau rugi >10%/hari
-  min_orderbook_depth_usd: 50   # liquidity gate
+  # liquidity gate diselaraskan dgn per_trade cap: dgn bankroll $1000 & cap 2%,
+  # notional maks per trade = $20, jadi gate $50 akan memblokir SEMUA trade.
+  # Diturunkan ke $15 agar konsisten (paper). Naikkan lagi saat bankroll besar.
+  min_orderbook_depth_usd: 15   # liquidity gate (selaras dgn per_trade cap)
   resolution_buffer_minutes: 30 # jangan buka posisi <30 menit sebelum resolve
 
 # --- EDGE / SINYAL ---
 edge:
   min_edge_threshold: 0.05      # |P_model - P_market| minimal untuk trade
   max_spread_pct: 0.04          # skip market dengan spread terlalu lebar
+
+# --- STRATEGI (multi-method; aktif/nonaktif tiap strategi) ---
+strategies:
+  arbitrage:
+    enabled: true
+  longshot_bias:                # fade longshot yang overpriced (favorite-longshot bias)
+    enabled: true
+    longshot_cutoff: 0.08       # harga YES <= ini dianggap "longshot"
+    shrink_factor: 0.6          # model_prob = price * shrink (longshot cenderung overpriced)
+  mean_reversion:               # harga bergerak jauh dari rata-rata jangka pendek -> reversi
+    enabled: true
+    lookback: 10                # jumlah snapshot untuk baseline
+    deviation_threshold: 0.06   # simpangan dari baseline untuk memicu sinyal
+
+# --- MULTI-VENUE (selain Polymarket) ---
+venues:
+  polymarket:
+    enabled: true
+  manifold:                     # API publik gratis (https://api.manifold.markets)
+    enabled: true
+  kalshi:                       # butuh API key (.env) untuk data penuh
+    enabled: false
+cross_venue:
+  enabled: true
+  match_threshold: 0.82         # kemiripan teks pertanyaan untuk dianggap market sama
+  min_discrepancy: 0.05         # selisih probabilitas antar-venue untuk sinyal
+  # CATATAN: cross-venue BUKAN riskless (settlement/timing beda) -> sinyal/analitik, bukan auto-exec
 
 # --- EKSEKUSI ---
 execution:

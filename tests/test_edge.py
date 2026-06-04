@@ -55,6 +55,21 @@ def test_mutually_exclusive_arb_detected():
     assert len(opp.legs) == 3
 
 
+def test_mutually_exclusive_rejects_incomplete_set():
+    # 2 longshot kandidat (sum 0.04) — TERLIHAT seperti free money, tapi set TAK lengkap.
+    # Guard kelengkapan harus menolaknya (kandidat lain bisa menang).
+    outcomes = [("a", "A", book(0.02, 1000)), ("b", "B", book(0.02, 1000))]
+    assert detect_mutually_exclusive(outcomes) is None
+
+
+def test_mutually_exclusive_accepts_near_complete_set():
+    # set lengkap: jumlah harga ~0.95 (< 1) -> arb sejati edge kecil ~0.05
+    outcomes = [("a", "A", book(0.50, 1000)), ("b", "B", book(0.45, 1000))]
+    opp = detect_mutually_exclusive(outcomes)
+    assert opp is not None
+    assert abs(opp.edge - 0.05) < 1e-9
+
+
 def test_mutually_exclusive_no_arb_when_overpriced():
     outcomes = [("a", "A", book(0.40)), ("b", "B", book(0.65))]  # sum 1.05
     assert detect_mutually_exclusive(outcomes) is None

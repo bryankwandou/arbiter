@@ -24,6 +24,8 @@ class JournalEntry(BaseModel):
     locked_profit: float
     fully_filled: bool
     note: str = ""
+    strategy: str = "arbitrage"   # tag untuk analitik per-strategi
+    venue: str = "polymarket"     # tag untuk analitik per-venue
 
 
 class TradeJournal:
@@ -31,10 +33,13 @@ class TradeJournal:
         self.path = path
         self.path.parent.mkdir(parents=True, exist_ok=True)
 
-    def record(self, desc: str, res: ArbResult) -> JournalEntry:
+    def record(
+        self, desc: str, res: ArbResult, strategy: str = "arbitrage", venue: str = "polymarket"
+    ) -> JournalEntry:
         entry = JournalEntry(
             market_id=res.market_id, desc=desc, filled_sets=res.filled_sets,
             locked_profit=res.locked_profit, fully_filled=res.fully_filled, note=res.note,
+            strategy=strategy, venue=venue,
         )
         with self.path.open("a", encoding="utf-8") as f:
             f.write(entry.model_dump_json() + "\n")

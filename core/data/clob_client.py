@@ -94,6 +94,18 @@ def parse_market(raw: dict[str, Any]) -> Market | None:
     )
 
 
+def yes_token_id(market: Market) -> str | None:
+    """Token id untuk outcome 'Yes' (fallback: token pertama)."""
+    for t in market.tokens:
+        if t.outcome.strip().lower() in ("yes", "ya"):
+            return t.token_id
+    return market.tokens[0].token_id if market.tokens else None
+
+
+# alias dipakai adapter venue
+_yes_token_outcome = yes_token_id
+
+
 def is_political(market: Market) -> bool:
     """Heuristik: cek tag + teks pertanyaan terhadap POLITICS_KEYWORDS."""
     haystack = " ".join([market.question, market.slug, *market.tags]).lower()

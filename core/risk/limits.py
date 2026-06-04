@@ -16,6 +16,8 @@ import math
 from pydantic import BaseModel
 
 from core.edge.arbitrage import ArbOpportunity
+from core.edge.strategies.base import Signal
+from core.risk.kelly import fractional_kelly
 from core.risk.killswitch import KillSwitch
 
 
@@ -33,6 +35,7 @@ class RiskManager:
         self.max_per_market_pct = float(risk_cfg.get("max_per_market_pct", 0.05))
         self.max_open_positions = int(risk_cfg.get("max_open_positions", 5))
         self.min_depth_usd = float(risk_cfg.get("min_orderbook_depth_usd", 50.0))
+        self.kelly_fraction = float(risk_cfg.get("kelly_fraction", 0.25))
         self.killswitch = KillSwitch(float(risk_cfg.get("daily_loss_limit_pct", 0.10)))
         self.killswitch.start_day(bankroll_usd)
         self._open: dict[str, float] = {}  # market_id -> notional terbuka
@@ -80,6 +83,28 @@ class RiskManager:
             reasons.append("dibatasi oleh cap modal (bukan likuiditas)")
 
         return SizingDecision(approved=True, sets=sets, notional_usd=notional, reasons=reasons)
+
+    def size_signal(self, signal: Signal, market_id: str) -> SizingDecision:
+        """Sizing bet directional via fractional Kelly + hard caps."""
+        if self.killswitch.tripped:
+            return SizingDecision(approved=False, reasons=[f"kill-switch: {self.killswitch.reason}"])
+        if market_id not in self._open and len(self._open) >= self.max_open_positions:
+            return SizingDecision(approved=False, reasons=["max_open_positions tercapai"])
+        if not signal.valid:
+            return SizingDecision(approved=False, reasons=["signal tidak valid (edge<=0)"])
+
+        # Kelly fraction (sudah di-clamp ke per_trade cap)
+        frac = fractional_kelly(signal.model_prob, signal.entry_price,
+                                fraction=self.kelly_fraction, hard_cap=self.max_per_trade_pct)
+        if frac <= 0:
+            return SizingDecision(approved=False, reasons=["Kelly=0 (tak ada edge bisa di-size)"])
+
+        notional = min(self.bankroll * frac, self._market_room(market_id))
+        if notional < self.min_depth_usd:
+            return SizingDecision(approved=False,
+                                  reasons=[f"notional ${notional:.2f} < gate ${self.min_depth_usd}"])
+        sets = notional / signal.entry_price if signal.entry_price > 0 else 0.0
+        return SizingDecision(approved=True, sets=round(sets, 2), notional_usd=notional)
 
     # --- pencatatan posisi & PnL ---
     def register_open(self, market_id: str, notional: float) -> None:

@@ -92,12 +92,20 @@ def detect_binary_dutch_book(
 
 
 def detect_mutually_exclusive(
-    outcomes: list[tuple[str, str, OrderBook]], cost: float = 0.0
+    outcomes: list[tuple[str, str, OrderBook]],
+    cost: float = 0.0,
+    min_completeness_sum: float = 0.90,
 ) -> ArbOpportunity | None:
-    """Cek arbitrage di set saling-eksklusif-dan-menyeluruh.
+    """Cek arbitrage di set saling-eksklusif-dan-MENYELURUH.
 
     `outcomes`: list of (token_id, label, orderbook) untuk sisi YES tiap kandidat.
-    Asumsi: tepat satu resolve YES (mis. neg-risk group / 1 pemilu).
+    Asumsi KRITIS: set LENGKAP — tepat satu resolve YES (mis. SEMUA kandidat 1 pemilu).
+
+    ⚠️  GUARD KELENGKAPAN: kalau kita hanya menangkap SEBAGIAN kandidat, jumlah harga
+    YES bisa jauh < 1 dan tampak seperti "uang gratis" — PADAHAL kandidat yang tak
+    tertangkap bisa menang (tidak ada jaminan payout). Ini false-positive berbahaya.
+    Maka: tolak kalau cost_per_set < min_completeness_sum (set kemungkinan tak lengkap).
+    Arb sejati di set lengkap punya jumlah harga MENDEKATI 1 (edge kecil, beberapa %).
     """
     if len(outcomes) < 2:
         return None
@@ -107,11 +115,17 @@ def detect_mutually_exclusive(
     for token_id, label, book in outcomes:
         ba = _best_ask_with_size(book)
         if ba is None:
-            return None  # set tak lengkap -> tak bisa kunci arb
+            return None  # ada leg tanpa ask -> tak bisa kunci arb
         price, size = ba
         cost_per_set += price
         min_size = min(min_size, size)
         legs.append(ArbLeg(token_id=token_id, label=label, side="buy", price=price, max_size=size))
+
+    # Guard kelengkapan: jumlah harga terlalu rendah => set tak lengkap => BUKAN arb.
+    # Toleransi epsilon untuk hindari penolakan akibat galat floating point di batas.
+    if cost_per_set < min_completeness_sum - 1e-9:
+        return None
+
     edge = (1.0 - cost_per_set) - cost
     if edge <= 0:
         return None
