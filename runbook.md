@@ -14,9 +14,10 @@ pytest -q                              # harus hijau sebelum lanjut
 
 ## Status fase
 - [x] FASE 0 — Setup & hipotesis (struktur, config, test fondasi)
-- [ ] FASE 1 — Data ingestion read-only (CLOB publik)
-- [ ] FASE 2 — Edge engine
-- [ ] FASE 3 — Risk module
+- [x] FASE 1 — Data ingestion read-only (CLOB publik) — `python -m core.data.collect`
+- [x] FASE 2 — Edge engine (arbitrage + validasi sinyal)
+- [x] FASE 3 — Risk module (Kelly, kill-switch, hard limits)
+- [x] (bonus) Scanner integrasi read-only — `python -m core.edge.scanner`
 - [ ] FASE 4 — Backtest (titik keputusan: ada edge atau tidak)
 - [ ] FASE 5 — Paper trading (≥14 hari)
 - [ ] FASE 6 — Live mikro ($5–$10, opsional, hanya jika 4 & 5 lolos)
