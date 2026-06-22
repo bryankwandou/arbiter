@@ -12,6 +12,11 @@ const ActionPanel = nextDynamic(
   { ssr: false, loading: () => null }
 );
 
+const AIInsightPanel = nextDynamic(
+  () => import("@/components/AIInsightPanel").then((m) => ({ default: m.AIInsightPanel })),
+  { ssr: false, loading: () => null }
+);
+
 export const dynamic = "force-dynamic";
 
 function fmtPnl(n: number) {
@@ -408,6 +413,11 @@ async function DashboardContent() {
 
         <MarketAccessCard mode={stats.mode} />
       </div>
+
+      {/* ── AI Insight Panel ──────────────────────────────────────────────── */}
+      {opportunities.length > 0 && (
+        <AIInsightPanel opportunity={opportunities[0]} stats={stats} />
+      )}
 
       {/* ── Recent trades ───────────────────────────────────────────────────── */}
       <div className="card">
