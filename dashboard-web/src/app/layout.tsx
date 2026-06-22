@@ -8,6 +8,7 @@ const inter = Inter({
   subsets: ["latin"],
   variable: "--font-inter",
   display: "swap",
+  weight: ["400", "500", "600", "700", "800"],
 });
 
 export const metadata: Metadata = {
@@ -28,11 +29,18 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
   return (
     <html lang="en" className={inter.variable}>
       <body>
-        <div style={{ display: "flex", height: "100vh", overflow: "hidden" }}>
+        <div style={{ display: "flex", height: "100vh", overflow: "hidden", backgroundColor: "var(--bg)" }}>
           <Sidebar />
           <div style={{ display: "flex", flexDirection: "column", flex: 1, overflow: "hidden", minWidth: 0 }}>
             <TopBar />
-            <main style={{ flex: 1, overflowY: "auto", padding: "24px" }}>
+            <main
+              style={{
+                flex: 1,
+                overflowY: "auto",
+                padding: "20px 24px 32px",
+                scrollbarGutter: "stable",
+              }}
+            >
               {children}
             </main>
           </div>

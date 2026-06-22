@@ -24,35 +24,13 @@ function IconChevronLeft() {
 
 // ── Shared styles ─────────────────────────────────────────────────────────────
 const S = {
-  infoRow: {
-    display: "flex",
-    flexDirection: "column" as const,
-    gap: "2px",
-  },
-  infoLabel: {
-    fontSize: "10px",
-    color: "var(--text-3)",
-    textTransform: "uppercase" as const,
-    letterSpacing: "0.05em",
-  },
-  infoValue: {
-    fontSize: "13px",
-    fontFamily: "monospace",
-    color: "var(--accent)",
-    fontWeight: 600,
-  },
+  infoRow: { display: "flex", flexDirection: "column" as const, gap: "2px" },
+  infoLabel: { fontSize: "10px", color: "var(--text-3)", textTransform: "uppercase" as const, letterSpacing: "0.05em" },
+  infoValue: { fontSize: "13px", fontFamily: "monospace", color: "var(--accent)", fontWeight: 600 },
 };
 
 // ── Add Funds Modal ───────────────────────────────────────────────────────────
-function AddFundsModal({
-  current,
-  onClose,
-  onSuccess,
-}: {
-  current: number;
-  onClose: () => void;
-  onSuccess: (v: number) => void;
-}) {
+function AddFundsModal({ current, onClose, onSuccess }: { current: number; onClose: () => void; onSuccess: (v: number) => void }) {
   const [value, setValue] = useState(String(current));
   const [loading, setLoading] = useState(false);
   const [alert, setAlert] = useState<{ text: string; ok: boolean } | null>(null);
@@ -67,7 +45,7 @@ function AddFundsModal({
     const res = await setBankroll(amount, "set via dashboard");
     setLoading(false);
     if (res.ok) {
-      setAlert({ text: `Bankroll updated: $${res.old.toFixed(2)} → $${res.new.toFixed(2)}`, ok: true });
+      setAlert({ text: `Bankroll updated: $${res.old.toFixed(2)} to $${res.new.toFixed(2)}`, ok: true });
       setTimeout(() => { onSuccess(res.new); onClose(); }, 1200);
     } else {
       setAlert({ text: (res as { detail?: string }).detail ?? "Failed to update bankroll.", ok: false });
@@ -79,21 +57,12 @@ function AddFundsModal({
       <div className="modal" onClick={(e) => e.stopPropagation()}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "20px" }}>
           <span className="modal-title">Set Bankroll</span>
-          <button onClick={onClose} className="btn btn-ghost" style={{ padding: "4px 10px" }}>
-            &times;
-          </button>
+          <button onClick={onClose} className="btn btn-ghost" style={{ padding: "4px 10px" }}>&times;</button>
         </div>
-
         <div style={{ fontSize: "12px", color: "var(--text-3)", marginBottom: "14px" }}>
-          Current bankroll:{" "}
-          <span className="mono" style={{ color: "var(--accent)", fontWeight: 600 }}>
-            ${current.toFixed(2)}
-          </span>
+          Current: <span className="mono" style={{ color: "var(--accent)", fontWeight: 600 }}>${current.toFixed(2)}</span>
         </div>
-
-        <label className="label" style={{ display: "block", marginBottom: "6px" }}>
-          New amount (USD)
-        </label>
+        <label className="label" style={{ display: "block", marginBottom: "6px" }}>New amount (USD)</label>
         <input
           className="input"
           type="number"
@@ -102,13 +71,11 @@ function AddFundsModal({
           onKeyDown={(e) => e.key === "Enter" && submit()}
           autoFocus
         />
-
         {alert && (
           <div className={`alert ${alert.ok ? "alert-success" : "alert-danger"}`} style={{ marginTop: "12px" }}>
             {alert.text}
           </div>
         )}
-
         <div style={{ display: "flex", gap: "8px", marginTop: "18px", justifyContent: "flex-end" }}>
           <button onClick={onClose} className="btn btn-ghost">Cancel</button>
           <button onClick={submit} disabled={loading} className="btn btn-primary">
@@ -123,13 +90,7 @@ function AddFundsModal({
 // ── Open Position Modal ───────────────────────────────────────────────────────
 type Step = "idle" | "scanning" | "select" | "confirm" | "done";
 
-function OpenPositionModal({
-  onClose,
-  onSuccess,
-}: {
-  onClose: () => void;
-  onSuccess: () => void;
-}) {
+function OpenPositionModal({ onClose, onSuccess }: { onClose: () => void; onSuccess: () => void }) {
   const [step, setStep] = useState<Step>("idle");
   const [results, setResults] = useState<ScanOpportunity[]>([]);
   const [selected, setSelected] = useState<ScanOpportunity | null>(null);
@@ -172,17 +133,11 @@ function OpenPositionModal({
     });
     setLoading(false);
     if (res.ok) {
-      setAlert({
-        text: `Position opened. Locked profit: $${res.position.locked_profit.toFixed(4)}`,
-        ok: true,
-      });
+      setAlert({ text: `Position opened. Locked profit: $${res.position.locked_profit.toFixed(4)}`, ok: true });
       setStep("done");
       setTimeout(() => { onSuccess(); onClose(); }, 1800);
     } else {
-      setAlert({
-        text: (res as { detail?: string }).detail ?? "Failed to open position.",
-        ok: false,
-      });
+      setAlert({ text: (res as { detail?: string }).detail ?? "Failed to open position.", ok: false });
     }
   };
 
@@ -191,19 +146,15 @@ function OpenPositionModal({
   return (
     <div className="overlay" onClick={onClose}>
       <div className="modal" onClick={(e) => e.stopPropagation()}>
-        {/* Header */}
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "20px" }}>
           <span className="modal-title">Open Paper Position</span>
-          <button onClick={onClose} className="btn btn-ghost" style={{ padding: "4px 10px" }}>
-            &times;
-          </button>
+          <button onClick={onClose} className="btn btn-ghost" style={{ padding: "4px 10px" }}>&times;</button>
         </div>
 
-        {/* Step: idle / scanning */}
         {(step === "idle" || step === "scanning") && (
           <div>
             <p style={{ fontSize: "12px", color: "var(--text-2)", marginBottom: "16px", lineHeight: 1.6 }}>
-              Scan Polymarket live for arbitrage opportunities using the Dutch book detector.
+              Scan Polymarket live for Dutch book arbitrage opportunities.
             </p>
             <div style={{ display: "flex", gap: "10px", alignItems: "center", marginBottom: "14px" }}>
               <label className="label" style={{ whiteSpace: "nowrap" }}>Min edge</label>
@@ -221,38 +172,27 @@ function OpenPositionModal({
                 {(parseFloat(minEdge) * 100 || 3).toFixed(0)}%
               </span>
             </div>
-
             {scanErr && (
               <div className="alert alert-danger" style={{ marginBottom: "14px" }}>
                 {scanErr.includes("8001") || scanErr.includes("offline") || scanErr.includes("connect")
-                  ? "Bot API is offline. Run: uvicorn api.server:app --port 8001"
+                  ? "Bot API offline. For live order placement, run: uvicorn api.server:app --port 8001"
                   : scanErr}
               </div>
             )}
-
-            <button
-              onClick={doScan}
-              disabled={step === "scanning"}
-              className="btn btn-primary"
-              style={{ width: "100%" }}
-            >
+            <button onClick={doScan} disabled={step === "scanning"} className="btn btn-primary" style={{ width: "100%" }}>
               {step === "scanning" ? "Scanning markets (10–30 s)…" : "Scan Markets Now"}
             </button>
           </div>
         )}
 
-        {/* Step: select */}
         {step === "select" && (
           <div>
             <div style={{ fontSize: "12px", color: "var(--text-2)", marginBottom: "12px" }}>
               Found{" "}
-              <span className="mono" style={{ color: "var(--success)", fontWeight: 600 }}>
-                {results.length}
-              </span>{" "}
+              <span className="mono" style={{ color: "var(--success)", fontWeight: 600 }}>{results.length}</span>{" "}
               {results.length === 1 ? "opportunity" : "opportunities"}.
               {results.length === 0 && " Markets are currently efficient — no arb passed the filter."}
             </div>
-
             {results.length > 0 && (
               <div style={{ display: "flex", flexDirection: "column", gap: "5px", maxHeight: "340px", overflowY: "auto" }}>
                 {results.map((opp) => (
@@ -283,16 +223,7 @@ function OpenPositionModal({
                     }}
                   >
                     <div style={{ flex: 1, minWidth: 0 }}>
-                      <div
-                        style={{
-                          fontSize: "12px",
-                          fontWeight: 500,
-                          marginBottom: "3px",
-                          overflow: "hidden",
-                          textOverflow: "ellipsis",
-                          whiteSpace: "nowrap",
-                        }}
-                      >
+                      <div style={{ fontSize: "12px", fontWeight: 500, marginBottom: "3px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                         {opp.question}
                       </div>
                       <div style={{ fontSize: "11px", color: "var(--text-3)" }}>
@@ -309,20 +240,15 @@ function OpenPositionModal({
                 ))}
               </div>
             )}
-
             <button onClick={() => setStep("idle")} className="btn btn-ghost" style={{ marginTop: "12px", width: "100%" }}>
               Scan again
             </button>
           </div>
         )}
 
-        {/* Step: confirm */}
         {step === "confirm" && selected && (
           <div>
-            <div
-              className="card"
-              style={{ marginBottom: "16px", backgroundColor: "var(--bg)" }}
-            >
+            <div className="card" style={{ marginBottom: "16px", backgroundColor: "var(--bg)" }}>
               <div className="label" style={{ marginBottom: "6px" }}>Selected market</div>
               <div style={{ fontSize: "13px", fontWeight: 500, marginBottom: "12px", lineHeight: 1.4 }}>
                 {selected.question}
@@ -340,7 +266,6 @@ function OpenPositionModal({
                 ))}
               </div>
             </div>
-
             <label className="label" style={{ display: "block", marginBottom: "6px" }}>
               Number of sets (max {selected.executable_sets.toFixed(2)})
             </label>
@@ -368,13 +293,11 @@ function OpenPositionModal({
                 </span>
               </span>
             </div>
-
             {alert && (
               <div className={`alert ${alert.ok ? "alert-success" : "alert-danger"}`} style={{ marginTop: "12px" }}>
                 {alert.text}
               </div>
             )}
-
             <div style={{ display: "flex", gap: "8px", marginTop: "18px" }}>
               <button onClick={() => setStep("select")} className="btn btn-ghost" style={{ flex: 1 }}>
                 <IconChevronLeft /> Back
@@ -400,12 +323,9 @@ function OpenPositionModal({
 function PositionsTable({ positions, onClose }: { positions: Position[]; onClose: (id: string) => void }) {
   const open = positions.filter((p) => p.status === "open");
   if (!open.length) return null;
-
   return (
     <div className="card" style={{ backgroundColor: "var(--card)" }}>
-      <div className="label" style={{ marginBottom: "12px" }}>
-        Open Positions ({open.length})
-      </div>
+      <div className="label" style={{ marginBottom: "12px" }}>Open Positions ({open.length})</div>
       <div style={{ display: "flex", flexDirection: "column", gap: "5px" }}>
         {open.map((p) => (
           <div
@@ -421,16 +341,7 @@ function PositionsTable({ positions, onClose }: { positions: Position[]; onClose
             }}
           >
             <div style={{ flex: 1, minWidth: 0, marginRight: "12px" }}>
-              <div
-                style={{
-                  fontSize: "12px",
-                  fontWeight: 500,
-                  marginBottom: "2px",
-                  overflow: "hidden",
-                  textOverflow: "ellipsis",
-                  whiteSpace: "nowrap",
-                }}
-              >
+              <div style={{ fontSize: "12px", fontWeight: 500, marginBottom: "2px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                 {p.question}
               </div>
               <div style={{ fontSize: "11px", color: "var(--text-3)" }}>
@@ -438,25 +349,12 @@ function PositionsTable({ positions, onClose }: { positions: Position[]; onClose
               </div>
             </div>
             <div style={{ textAlign: "right", marginRight: "12px", flexShrink: 0 }}>
-              <div
-                className="mono"
-                style={{
-                  fontSize: "13px",
-                  fontWeight: 600,
-                  color: p.locked_profit >= 0 ? "var(--success)" : "var(--danger)",
-                }}
-              >
+              <div className="mono" style={{ fontSize: "13px", fontWeight: 600, color: p.locked_profit >= 0 ? "var(--success)" : "var(--danger)" }}>
                 {p.locked_profit >= 0 ? "+" : ""}${p.locked_profit.toFixed(4)}
               </div>
-              <div style={{ fontSize: "10px", color: "var(--text-3)" }}>
-                {(p.edge_pct * 100).toFixed(1)}% edge
-              </div>
+              <div style={{ fontSize: "10px", color: "var(--text-3)" }}>{(p.edge_pct * 100).toFixed(1)}% edge</div>
             </div>
-            <button
-              onClick={() => onClose(p.id)}
-              className="btn btn-danger"
-              style={{ padding: "5px 10px", fontSize: "11px" }}
-            >
+            <button onClick={() => onClose(p.id)} className="btn btn-danger" style={{ padding: "5px 10px", fontSize: "11px" }}>
               Close
             </button>
           </div>
@@ -466,35 +364,14 @@ function PositionsTable({ positions, onClose }: { positions: Position[]; onClose
   );
 }
 
-// ── Bot Status Badge ──────────────────────────────────────────────────────────
-function BotStatusBadge({ online }: { online: boolean | null }) {
-  if (online === null) return null;
-  return (
-    <div
-      style={{
-        display: "flex",
-        alignItems: "center",
-        gap: "6px",
-        padding: "4px 10px",
-        borderRadius: "99px",
-        fontSize: "11px",
-        fontWeight: 500,
-        backgroundColor: online ? "var(--success-muted)" : "var(--danger-muted)",
-        border: `1px solid ${online ? "rgba(16,185,129,0.25)" : "rgba(239,68,68,0.25)"}`,
-        color: online ? "var(--success)" : "var(--danger)",
-      }}
-    >
-      <div
-        className="status-dot"
-        style={{ backgroundColor: online ? "var(--success)" : "var(--danger)" }}
-      />
-      {online ? "Bot connected" : "Bot offline"}
-    </div>
-  );
-}
-
 // ── Main ActionPanel ──────────────────────────────────────────────────────────
-export function ActionPanel({ initialBankroll }: { initialBankroll: number }) {
+export function ActionPanel({
+  initialBankroll,
+  vercelNative = false,
+}: {
+  initialBankroll: number;
+  vercelNative?: boolean;
+}) {
   const [bankroll, setBankrollState] = useState(initialBankroll);
   const [showFunds, setShowFunds] = useState(false);
   const [showPosition, setShowPosition] = useState(false);
@@ -534,24 +411,61 @@ export function ActionPanel({ initialBankroll }: { initialBankroll: number }) {
         <button onClick={() => setShowFunds(true)} className="btn btn-primary">
           <IconPlus /> Set Bankroll
         </button>
-        <button
-          onClick={() => setShowPosition(true)}
-          className="btn btn-success"
-        >
+        <button onClick={() => setShowPosition(true)} className="btn btn-success">
           Open Position
         </button>
-        {botOnline !== null && (
-          <div style={{ marginLeft: "auto" }}>
-            <BotStatusBadge online={botOnline} />
-          </div>
-        )}
+
+        <div style={{ marginLeft: "auto" }}>
+          {vercelNative ? (
+            /* On Vercel: scanner is running, don't show "Bot offline" */
+            <div
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: "6px",
+                padding: "4px 12px",
+                borderRadius: "99px",
+                fontSize: "11px",
+                fontWeight: 500,
+                backgroundColor: "var(--success-muted)",
+                border: "1px solid rgba(16,185,129,0.25)",
+                color: "var(--success)",
+              }}
+            >
+              <div className="status-dot status-dot-live" style={{ backgroundColor: "var(--success)" }} />
+              Scanner active
+            </div>
+          ) : botOnline !== null ? (
+            <div
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: "6px",
+                padding: "4px 12px",
+                borderRadius: "99px",
+                fontSize: "11px",
+                fontWeight: 500,
+                backgroundColor: botOnline ? "var(--success-muted)" : "rgba(255,255,255,0.04)",
+                border: `1px solid ${botOnline ? "rgba(16,185,129,0.25)" : "var(--border)"}`,
+                color: botOnline ? "var(--success)" : "var(--text-3)",
+              }}
+            >
+              <div className="status-dot" style={{ backgroundColor: botOnline ? "var(--success)" : "var(--text-4)" }} />
+              {botOnline ? "Bot connected" : "Bot offline"}
+            </div>
+          ) : null}
+        </div>
       </div>
 
-      {botOnline === false && (
-        <div style={{ fontSize: "11px", color: "var(--text-3)", paddingLeft: "2px" }}>
-          Live bot API offline — positions are simulated (paper).{" "}
-          <span className="mono" style={{ color: "var(--text-2)", fontSize: "10px" }}>
-            uvicorn api.server:app --host 0.0.0.0 --port 8001
+      {/* Only show Railway hint when NOT vercel-native AND bot is confirmed offline */}
+      {!vercelNative && botOnline === false && (
+        <div style={{ fontSize: "11px", color: "var(--text-3)" }}>
+          Running paper mode on Vercel Edge.{" "}
+          <span style={{ color: "var(--text-4)" }}>
+            For live execution:{" "}
+            <span className="mono" style={{ fontSize: "10px", color: "var(--text-3)" }}>
+              uvicorn api.server:app --host 0.0.0.0 --port 8001
+            </span>
           </span>
         </div>
       )}
@@ -559,17 +473,10 @@ export function ActionPanel({ initialBankroll }: { initialBankroll: number }) {
       {positions.length > 0 && <PositionsTable positions={positions} onClose={handleClose} />}
 
       {showFunds && (
-        <AddFundsModal
-          current={bankroll}
-          onClose={() => setShowFunds(false)}
-          onSuccess={(v) => setBankrollState(v)}
-        />
+        <AddFundsModal current={bankroll} onClose={() => setShowFunds(false)} onSuccess={(v) => setBankrollState(v)} />
       )}
       {showPosition && (
-        <OpenPositionModal
-          onClose={() => setShowPosition(false)}
-          onSuccess={refreshPositions}
-        />
+        <OpenPositionModal onClose={() => setShowPosition(false)} onSuccess={refreshPositions} />
       )}
     </>
   );
