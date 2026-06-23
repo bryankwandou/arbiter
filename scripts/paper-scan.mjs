@@ -6,21 +6,33 @@ import { join, dirname } from "path";
 import { fileURLToPath } from "url";
 
 // ── Neon Postgres client (optional — requires @neondatabase/serverless) ──────
+import { createRequire } from "module";
+const _require = createRequire(import.meta.url);
+
 let neonSql = null;
 if (process.env.DATABASE_URL) {
-  try {
-    const { neon } = await import("@neondatabase/serverless");
-    neonSql = neon(process.env.DATABASE_URL);
-    console.log("Neon Postgres: connected.");
-  } catch (err) {
-    console.warn("Neon driver not available:", err.message, "— writing JSON only.");
+  // Try several resolution paths (GitHub Actions installs to /tmp/neon-pkg, local uses dashboard-web)
+  const scriptDir = dirname(fileURLToPath(import.meta.url));
+  const localNeon = join(scriptDir, "..", "dashboard-web", "node_modules", "@neondatabase", "serverless", "index.js");
+  const NEON_CANDIDATES = [
+    "/tmp/neon-pkg/node_modules/@neondatabase/serverless/index.js",
+    localNeon,
+  ];
+  for (const candidate of NEON_CANDIDATES) {
+    try {
+      const { neon } = _require(candidate);
+      neonSql = neon(process.env.DATABASE_URL);
+      console.log("Neon Postgres: connected via", candidate.split("/").slice(-4).join("/"));
+      break;
+    } catch { /* try next */ }
   }
+  if (!neonSql) console.warn("Neon driver not found in any candidate path — writing JSON only.");
 }
 
 async function dbRun(query, ...params) {
   if (!neonSql) return;
   try {
-    await neonSql(query, params);
+    await neonSql.query(query, params);
   } catch (err) {
     console.warn("DB write error:", err.message);
   }
