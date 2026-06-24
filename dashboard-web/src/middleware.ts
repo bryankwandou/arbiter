@@ -1,48 +1,36 @@
+import { getToken } from "next-auth/jwt";
 import { NextRequest, NextResponse } from "next/server";
-
-function timingSafeEqual(a: string, b: string): boolean {
-  if (a.length !== b.length) return false;
-  let diff = 0;
-  for (let i = 0; i < a.length; i++) diff |= a.charCodeAt(i) ^ b.charCodeAt(i);
-  return diff === 0;
-}
 
 function requestId(): string {
   return `req_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
 }
 
-export function middleware(req: NextRequest) {
+export async function middleware(req: NextRequest) {
   const rid = requestId();
-  const isApi = req.nextUrl.pathname.startsWith("/api/");
-  const pw = process.env.DASHBOARD_PASSWORD;
+  const { pathname } = req.nextUrl;
 
-  // Optional HTTP Basic Auth on non-API routes (dashboard pages only)
-  if (pw && !isApi) {
-    const auth = req.headers.get("authorization") ?? "";
-    let pass = false;
+  // Paths that never require auth
+  const isApi     = pathname.startsWith("/api/");
+  const isLogin   = pathname.startsWith("/login");
+  const isStatic  = pathname.startsWith("/_next/");
 
-    if (auth.startsWith("Basic ")) {
-      try {
-        const decoded = atob(auth.slice(6));
-        const colonIdx = decoded.indexOf(":");
-        const supplied = colonIdx >= 0 ? decoded.slice(colonIdx + 1) : decoded;
-        pass = timingSafeEqual(supplied, pw);
-      } catch {
-        pass = false;
-      }
-    }
-
-    if (!pass) {
-      return new NextResponse("Unauthorized — provide password", {
-        status: 401,
-        headers: { "WWW-Authenticate": 'Basic realm="Arbiter"' },
-      });
-    }
-  }
-
-  // Propagate x-request-id through to route handlers and response
+  // Propagate request ID to route handlers
   const reqHeaders = new Headers(req.headers);
   reqHeaders.set("x-request-id", rid);
+
+  // Dashboard pages require NextAuth JWT session (if DASHBOARD_PASSWORD configured)
+  if (!isApi && !isLogin && !isStatic && process.env.DASHBOARD_PASSWORD) {
+    const token = await getToken({
+      req,
+      secret: process.env.NEXTAUTH_SECRET ?? process.env.NEXTAUTH_SECRET,
+    });
+
+    if (!token) {
+      const loginUrl = new URL("/login", req.url);
+      loginUrl.searchParams.set("callbackUrl", req.url);
+      return NextResponse.redirect(loginUrl);
+    }
+  }
 
   const res = NextResponse.next({ request: { headers: reqHeaders } });
   res.headers.set("x-request-id", rid);
@@ -50,6 +38,5 @@ export function middleware(req: NextRequest) {
 }
 
 export const config = {
-  // Apply to all routes except Next.js internals + favicon
   matcher: ["/((?!_next/static|_next/image|favicon\\.ico).*)"],
 };

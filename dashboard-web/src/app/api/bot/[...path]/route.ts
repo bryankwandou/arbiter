@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
-import { applyRateLimit, assertSafeUrl, safeError } from "@/lib/security";
+import { applyRateLimit, assertSafeUrl, safeError, hashIp, slog } from "@/lib/security";
+import { writeAuditLog } from "@/lib/db";
 
 export const dynamic = "force-dynamic";
 
@@ -26,6 +27,11 @@ function matchAllowed(pathSegments: string[]): string[] | null {
 const BOT_URL = process.env.BOT_API_URL ?? "http://localhost:8001";
 
 async function proxy(req: NextRequest, path: string[]) {
+  const rid  = req.headers.get("x-request-id") ?? `req_${Date.now().toString(36)}`;
+  const ip   = req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ?? "unknown";
+  const ipH  = hashIp(ip);
+  const endpoint = `/api/bot/${path.join("/")}`;
+
   // ── Rate limiting ─────────────────────────────────────────────────────────
   const isWrite = req.method !== "GET" && req.method !== "HEAD";
   const rl = applyRateLimit(req, isWrite ? 5 : 30, 60_000, `bot:${req.method}`);
@@ -34,9 +40,12 @@ async function proxy(req: NextRequest, path: string[]) {
   // ── Path whitelist ────────────────────────────────────────────────────────
   const allowedMethods = matchAllowed(path);
   if (!allowedMethods) {
+    slog("warn", endpoint, "path not allowed", { request_id: rid, method: req.method });
+    void writeAuditLog({ request_id: rid, endpoint, method: req.method, ip_hash: ipH, status_code: 403 });
     return NextResponse.json({ error: "Path not allowed" }, { status: 403 });
   }
   if (!allowedMethods.includes(req.method)) {
+    void writeAuditLog({ request_id: rid, endpoint, method: req.method, ip_hash: ipH, status_code: 405 });
     return NextResponse.json({ error: `Method ${req.method} not allowed on this path` }, { status: 405 });
   }
 
