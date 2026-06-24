@@ -1,21 +1,12 @@
 import { Suspense } from "react";
-import nextDynamic from "next/dynamic";
 import { fetchDashboard } from "@/lib/api";
 import { MetricCard } from "@/components/MetricCard";
 import { EquityChart } from "@/components/EquityChart";
 import { RecentTrades } from "@/components/RecentTrades";
 import { OpportunitiesFeed } from "@/components/OpportunitiesFeed";
 import { AutoRefresh } from "@/components/AutoRefresh";
-
-const ActionPanel = nextDynamic(
-  () => import("@/components/ActionPanel").then((m) => ({ default: m.ActionPanel })),
-  { ssr: false, loading: () => null }
-);
-
-const AIInsightPanel = nextDynamic(
-  () => import("@/components/AIInsightPanel").then((m) => ({ default: m.AIInsightPanel })),
-  { ssr: false, loading: () => null }
-);
+import { ActionPanel } from "@/components/ActionPanel";
+import { AIInsightPanel } from "@/components/AIInsightPanel";
 
 export const dynamic = "force-dynamic";
 

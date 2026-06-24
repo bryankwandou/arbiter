@@ -85,4 +85,39 @@ export async function initSchema() {
     INSERT INTO bot_stats (id) VALUES (1)
     ON CONFLICT (id) DO NOTHING
   `;
+  // Immutable audit trail — append-only, indexed on created_at for time-range queries
+  await sql`
+    CREATE TABLE IF NOT EXISTS audit_log (
+      id          BIGSERIAL     PRIMARY KEY,
+      request_id  VARCHAR(40)   NOT NULL,
+      endpoint    VARCHAR(200)  NOT NULL,
+      method      VARCHAR(10)   NOT NULL,
+      ip_hash     VARCHAR(16)   NOT NULL,
+      status_code SMALLINT      NOT NULL,
+      auth_method VARCHAR(50),
+      created_at  TIMESTAMPTZ   NOT NULL DEFAULT NOW()
+    )
+  `;
+  await sql`CREATE INDEX IF NOT EXISTS idx_audit_log_created ON audit_log(created_at)`;
+}
+
+// Best-effort audit write — never throws, never blocks the response path
+export async function writeAuditLog(entry: {
+  request_id: string;
+  endpoint:   string;
+  method:     string;
+  ip_hash:    string;
+  status_code: number;
+  auth_method?: string;
+}): Promise<void> {
+  try {
+    const sql = getDb();
+    await sql`
+      INSERT INTO audit_log (request_id, endpoint, method, ip_hash, status_code, auth_method)
+      VALUES (
+        ${entry.request_id}, ${entry.endpoint}, ${entry.method},
+        ${entry.ip_hash}, ${entry.status_code}, ${entry.auth_method ?? null}
+      )
+    `;
+  } catch { /* non-blocking */ }
 }

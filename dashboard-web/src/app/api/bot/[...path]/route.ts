@@ -74,8 +74,8 @@ async function proxy(req: NextRequest, path: string[]) {
   }
 }
 
-type Ctx = { params: { path: string[] } };
+type Ctx = { params: Promise<{ path: string[] }> };
 
-export async function GET(req: NextRequest, { params }: Ctx)    { return proxy(req, params.path); }
-export async function POST(req: NextRequest, { params }: Ctx)   { return proxy(req, params.path); }
-export async function DELETE(req: NextRequest, { params }: Ctx) { return proxy(req, params.path); }
+export async function GET(req: NextRequest, ctx: Ctx)    { return proxy(req, (await ctx.params).path); }
+export async function POST(req: NextRequest, ctx: Ctx)   { return proxy(req, (await ctx.params).path); }
+export async function DELETE(req: NextRequest, ctx: Ctx) { return proxy(req, (await ctx.params).path); }

@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
-import { applyRateLimit, sanitizeString, sanitizeNumber, safeError, timingSafeEqual } from "@/lib/security";
+import { applyRateLimit, sanitizeString, sanitizeNumber, safeError, timingSafeEqual, hashIp, slog } from "@/lib/security";
+import { writeAuditLog } from "@/lib/db";
 
 export const dynamic = "force-dynamic";
 
@@ -48,20 +49,27 @@ export async function POST(req: NextRequest) {
   const scanApiToken = process.env.SCAN_API_TOKEN ?? "";
 
   let authenticated = false;
+  let authMethod = "none";
+
+  const rid = req.headers.get("x-request-id") ?? `req_${Date.now().toString(36)}`;
+  const ip  = req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ?? "unknown";
+  const ipH = hashIp(ip);
 
   if (scanApiToken && bearerToken && timingSafeEqual(bearerToken, scanApiToken)) {
-    // Path A: explicit SCAN_API_TOKEN (paper-scan.mjs when secret is set)
     authenticated = true;
+    authMethod = "bearer_token";
   } else {
-    // Path B: GitHub identity verification (no workflow file change needed)
     const ghRepo = req.headers.get("x-github-repository") ?? "";
     const ghSha  = req.headers.get("x-github-sha") ?? "";
     if (ghRepo && ghSha) {
       authenticated = await verifyGitHubIdentity(ghRepo, ghSha);
+      if (authenticated) authMethod = "github_sha";
     }
   }
 
   if (!authenticated) {
+    slog("warn", "/api/scan-result", "auth rejected", { request_id: rid, ip_hash: ipH });
+    void writeAuditLog({ request_id: rid, endpoint: "/api/scan-result", method: "POST", ip_hash: ipH, status_code: 401, auth_method: "rejected" });
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
@@ -210,6 +218,11 @@ export async function POST(req: NextRequest) {
       }
     }
 
+    slog("info", "/api/scan-result", "scan data written", {
+      request_id: rid, auth_method: authMethod, trades: new_trades.length, opportunities: opportunities.length,
+    });
+    void writeAuditLog({ request_id: rid, endpoint: "/api/scan-result", method: "POST", ip_hash: ipH, status_code: 200, auth_method: authMethod });
+
     return NextResponse.json({
       ok: true,
       written: {
@@ -220,6 +233,7 @@ export async function POST(req: NextRequest) {
       },
     });
   } catch (err) {
+    void writeAuditLog({ request_id: rid, endpoint: "/api/scan-result", method: "POST", ip_hash: ipH, status_code: 500, auth_method: authMethod });
     return safeError("scan-result", err);
   }
 }

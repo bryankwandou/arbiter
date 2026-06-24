@@ -114,6 +114,31 @@ export function safeError(label: string, err: unknown, status = 500): NextRespon
   return NextResponse.json({ error: "Internal server error" }, { status });
 }
 
+// ── Request ID for distributed tracing ────────────────────────────────────────
+export function generateRequestId(): string {
+  return `req_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
+}
+
+// ── One-way IP hash for privacy-preserving audit log (no PII stored) ─────────
+export function hashIp(ip: string): string {
+  let h = 2166136261;
+  for (let i = 0; i < ip.length; i++) h = Math.imul(h ^ ip.charCodeAt(i), 16777619) >>> 0;
+  return h.toString(16).padStart(8, "0");
+}
+
+// ── Structured JSON log (stdout → Vercel runtime logs, queryable) ────────────
+export function slog(
+  level: "info" | "warn" | "error",
+  endpoint: string,
+  message: string,
+  extra?: Record<string, unknown>
+): void {
+  const entry = { ts: new Date().toISOString(), level, endpoint, message, ...extra };
+  if (level === "error") console.error(JSON.stringify(entry));
+  else if (level === "warn")  console.warn(JSON.stringify(entry));
+  else                         console.log(JSON.stringify(entry));
+}
+
 // ── Validate SSRF risk: block private IP ranges ───────────────────────────────
 export function assertSafeUrl(rawUrl: string): void {
   let parsed: URL;
