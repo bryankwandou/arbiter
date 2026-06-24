@@ -18,8 +18,9 @@ export async function middleware(req: NextRequest) {
   const reqHeaders = new Headers(req.headers);
   reqHeaders.set("x-request-id", rid);
 
-  // Dashboard pages require NextAuth JWT session (if DASHBOARD_PASSWORD configured)
-  if (!isApi && !isLogin && !isStatic && process.env.DASHBOARD_PASSWORD) {
+  // Dashboard pages require NextAuth JWT session
+  const isSignup = pathname.startsWith("/signup");
+  if (!isApi && !isLogin && !isSignup && !isStatic && process.env.NEXTAUTH_SECRET) {
     const token = await getToken({
       req,
       secret: process.env.NEXTAUTH_SECRET ?? process.env.NEXTAUTH_SECRET,

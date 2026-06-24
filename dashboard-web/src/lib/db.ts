@@ -15,6 +15,25 @@ export function getDb() {
 // ── Schema init — call once on first deploy ───────────────────────────────────
 export async function initSchema() {
   const sql = getDb();
+
+  // Users table — must exist before tables with user_id FK
+  await sql`
+    CREATE TABLE IF NOT EXISTS users (
+      id            SERIAL PRIMARY KEY,
+      username      VARCHAR(50)   NOT NULL UNIQUE,
+      password_hash TEXT          NOT NULL,
+      email         VARCHAR(255),
+      created_at    TIMESTAMPTZ   NOT NULL DEFAULT NOW()
+    )
+  `;
+  await sql`CREATE INDEX IF NOT EXISTS idx_users_username ON users(LOWER(username))`;
+
+  // Seed default admin account (pre-computed bcrypt hash, rounds=10)
+  await sql`
+    INSERT INTO users (id, username, password_hash)
+    VALUES (1, 'nayrbryanGaming', '$2b$10$kJt1Ry9Wc3jcfJsV0kN8F.ecQd0sxZ.uyAFefY7rJ92XZ.3KeNEby')
+    ON CONFLICT (username) DO NOTHING
+  `;
   await sql`
     CREATE TABLE IF NOT EXISTS bot_stats (
       id              SERIAL PRIMARY KEY,
@@ -85,6 +104,12 @@ export async function initSchema() {
     INSERT INTO bot_stats (id) VALUES (1)
     ON CONFLICT (id) DO NOTHING
   `;
+  // Add user_id to existing tables (idempotent — safe to re-run)
+  await sql`ALTER TABLE bot_stats      ADD COLUMN IF NOT EXISTS user_id INT NOT NULL DEFAULT 1`;
+  await sql`ALTER TABLE trades         ADD COLUMN IF NOT EXISTS user_id INT NOT NULL DEFAULT 1`;
+  await sql`ALTER TABLE equity_history ADD COLUMN IF NOT EXISTS user_id INT NOT NULL DEFAULT 1`;
+  await sql`ALTER TABLE opportunities  ADD COLUMN IF NOT EXISTS user_id INT NOT NULL DEFAULT 1`;
+
   // Immutable audit trail — append-only, indexed on created_at for time-range queries
   await sql`
     CREATE TABLE IF NOT EXISTS audit_log (

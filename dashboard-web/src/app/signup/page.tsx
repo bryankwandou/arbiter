@@ -5,25 +5,56 @@ import { signIn } from "next-auth/react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 
-export default function LoginPage() {
-  const [username, setUsername] = useState("");
-  const [password, setPassword] = useState("");
-  const [error, setError]       = useState("");
-  const [loading, setLoading]   = useState(false);
+export default function SignupPage() {
+  const [username, setUsername]       = useState("");
+  const [password, setPassword]       = useState("");
+  const [confirm, setConfirm]         = useState("");
+  const [error, setError]             = useState("");
+  const [loading, setLoading]         = useState(false);
   const router = useRouter();
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
-    setLoading(true);
     setError("");
-    const result = await signIn("credentials", { username, password, redirect: false });
-    setLoading(false);
-    if (result?.error) {
-      setError("Incorrect username or password");
-      setPassword("");
-    } else {
-      router.push("/");
-      router.refresh();
+
+    if (!/^[a-zA-Z0-9_]{3,30}$/.test(username)) {
+      setError("Username: 3–30 characters, letters/numbers/underscore only");
+      return;
+    }
+    if (password.length < 8) {
+      setError("Password must be at least 8 characters");
+      return;
+    }
+    if (password !== confirm) {
+      setError("Passwords do not match");
+      return;
+    }
+
+    setLoading(true);
+    try {
+      const res = await fetch("/api/auth/signup", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ username, password }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setError(data.error ?? "Registration failed");
+        setLoading(false);
+        return;
+      }
+      // Auto sign-in after successful registration
+      const result = await signIn("credentials", { username, password, redirect: false });
+      if (result?.error) {
+        setError("Account created — please sign in");
+        router.push("/login");
+      } else {
+        router.push("/");
+        router.refresh();
+      }
+    } catch {
+      setError("Network error — please try again");
+      setLoading(false);
     }
   }
 
@@ -77,10 +108,10 @@ export default function LoginPage() {
             ARBITER
           </div>
           <div style={{ fontSize: "18px", fontWeight: 700, color: "#e6edf3", marginBottom: "4px" }}>
-            Sign in
+            Create account
           </div>
           <div style={{ fontSize: "12px", color: "#6e7681" }}>
-            Dutch book arbitrage · Paper trading
+            Join the paper trading network
           </div>
         </div>
 
@@ -111,7 +142,7 @@ export default function LoginPage() {
             <path d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l3.66-2.84z" fill="#FBBC05" opacity="0.4"/>
             <path d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" fill="#EA4335" opacity="0.4"/>
           </svg>
-          Google — Coming Soon
+          Continue with Google — Coming Soon
         </button>
 
         {/* Divider */}
@@ -130,14 +161,13 @@ export default function LoginPage() {
           <div style={{ flex: 1, height: "1px", background: "rgba(255,255,255,0.06)" }} />
         </div>
 
-        {/* Credentials form */}
         <form onSubmit={handleSubmit}>
           <div style={{ display: "flex", flexDirection: "column", gap: "12px", marginBottom: "16px" }}>
             <input
               type="text"
               value={username}
               onChange={(e) => setUsername(e.target.value)}
-              placeholder="Username"
+              placeholder="Username (3–30 chars)"
               required
               autoFocus
               autoComplete="username"
@@ -147,12 +177,21 @@ export default function LoginPage() {
               type="password"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
-              placeholder="Password"
+              placeholder="Password (min 8 characters)"
               required
-              autoComplete="current-password"
+              autoComplete="new-password"
+              style={input}
+            />
+            <input
+              type="password"
+              value={confirm}
+              onChange={(e) => setConfirm(e.target.value)}
+              placeholder="Confirm password"
+              required
+              autoComplete="new-password"
               style={{
                 ...input,
-                borderColor: error ? "rgba(239,68,68,0.5)" : undefined,
+                borderColor: confirm && confirm !== password ? "rgba(239,68,68,0.5)" : undefined,
               }}
             />
           </div>
@@ -175,35 +214,48 @@ export default function LoginPage() {
 
           <button
             type="submit"
-            disabled={loading || !username || !password}
+            disabled={loading || !username || !password || !confirm}
             style={{
               width: "100%",
               padding: "10px 16px",
               borderRadius: "6px",
               border: "none",
-              background: "linear-gradient(135deg, #2563eb 0%, #3b82f6 100%)",
+              background: "linear-gradient(135deg, #059669 0%, #10b981 100%)",
               color: "#fff",
               fontSize: "13px",
               fontWeight: 600,
-              cursor: loading || !username || !password ? "default" : "pointer",
-              opacity: loading || !username || !password ? 0.6 : 1,
+              cursor: loading || !username || !password || !confirm ? "default" : "pointer",
+              opacity: loading || !username || !password || !confirm ? 0.6 : 1,
               transition: "opacity 0.15s",
-              boxShadow: "0 2px 8px rgba(59,130,246,0.25)",
+              boxShadow: "0 2px 8px rgba(16,185,129,0.25)",
             }}
           >
-            {loading ? "Signing in…" : "Sign In"}
+            {loading ? "Creating account…" : "Create Account"}
           </button>
         </form>
 
-        {/* Footer */}
         <div style={{ marginTop: "20px", textAlign: "center", fontSize: "12px", color: "#6e7681" }}>
-          Don&apos;t have an account?{" "}
-          <Link
-            href="/signup"
-            style={{ color: "#3b82f6", textDecoration: "none", fontWeight: 500 }}
-          >
-            Create one
+          Already have an account?{" "}
+          <Link href="/login" style={{ color: "#3b82f6", textDecoration: "none", fontWeight: 500 }}>
+            Sign in
           </Link>
+        </div>
+
+        {/* Password rules hint */}
+        <div
+          style={{
+            marginTop: "16px",
+            padding: "10px 12px",
+            borderRadius: "6px",
+            background: "rgba(59,130,246,0.05)",
+            border: "1px solid rgba(59,130,246,0.1)",
+            fontSize: "10px",
+            color: "#6e7681",
+            lineHeight: 1.6,
+          }}
+        >
+          Username: letters, numbers, underscore · Min 3 chars<br />
+          Password: minimum 8 characters
         </div>
       </div>
     </div>
