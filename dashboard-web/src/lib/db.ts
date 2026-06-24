@@ -28,13 +28,16 @@ export async function initSchema() {
   `;
   await sql`CREATE INDEX IF NOT EXISTS idx_users_username ON users(LOWER(username))`;
 
-  // Seed default admin account (pre-computed bcrypt hash, rounds=10)
+  // Seed default admin account — store lowercase to match how signup route stores all usernames
   await sql`
     INSERT INTO users (id, username, password_hash)
-    VALUES (1, 'nayrbryanGaming', '$2b$10$kJt1Ry9Wc3jcfJsV0kN8F.ecQd0sxZ.uyAFefY7rJ92XZ.3KeNEby')
-    ON CONFLICT (username) DO NOTHING
+    VALUES (1, 'nayrbryangaming', '$2b$10$kJt1Ry9Wc3jcfJsV0kN8F.ecQd0sxZ.uyAFefY7rJ92XZ.3KeNEby')
+    ON CONFLICT (id) DO UPDATE SET username = 'nayrbryangaming'
   `;
-  // Advance SERIAL sequence past the explicitly-seeded id=1 so the first registration succeeds
+  // Remove any accidentally-created lowercase duplicate of the admin account
+  await sql`DELETE FROM bot_stats WHERE user_id IN (SELECT id FROM users WHERE username = 'nayrbryangaming' AND id != 1)`;
+  await sql`DELETE FROM users WHERE username = 'nayrbryangaming' AND id != 1`;
+  // Advance SERIAL sequence past the explicitly-seeded id=1 so the first registration always succeeds
   await sql`SELECT setval('users_id_seq', (SELECT MAX(id) FROM users))`;
   await sql`
     CREATE TABLE IF NOT EXISTS bot_stats (
@@ -106,6 +109,8 @@ export async function initSchema() {
   await sql`ALTER TABLE trades         ADD COLUMN IF NOT EXISTS user_id INT NOT NULL DEFAULT 1`;
   await sql`ALTER TABLE equity_history ADD COLUMN IF NOT EXISTS user_id INT NOT NULL DEFAULT 1`;
   await sql`ALTER TABLE opportunities  ADD COLUMN IF NOT EXISTS user_id INT NOT NULL DEFAULT 1`;
+  // Case-insensitive unique enforcement: prevents "nayrBryan" when "nayrbyan" already exists
+  await sql`CREATE UNIQUE INDEX IF NOT EXISTS uidx_users_username_lower ON users(LOWER(username))`;
   // Unique index on bot_stats.user_id enables per-user upsert without the serial id
   await sql`CREATE UNIQUE INDEX IF NOT EXISTS idx_bot_stats_user_id ON bot_stats(user_id)`;
   // Seed nayrbryanGaming's initial bot_stats row (user_id=1)
