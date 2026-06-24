@@ -10,13 +10,23 @@ import { fileURLToPath } from "url";
 const SCAN_API = process.env.SCAN_API_URL ?? "https://arbiterbot.vercel.app/api/scan-result";
 
 async function pushToNeon(payload) {
+  const token = process.env.SCAN_API_TOKEN;
+  if (!token) {
+    console.warn("SCAN_API_TOKEN not set — skipping Neon sync (set secret in GitHub Actions).");
+    return;
+  }
   try {
     const res = await fetch(SCAN_API, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": `Bearer ${token}`,
+      },
       body: JSON.stringify(payload),
       signal: AbortSignal.timeout(12_000),
     });
+    if (res.status === 401) { console.warn("Neon sync: 401 Unauthorized — check SCAN_API_TOKEN."); return; }
+    if (res.status === 429) { console.warn("Neon sync: rate limited — will retry next run."); return; }
     const data = await res.json();
     if (data.ok) {
       console.log("Neon sync: ok —", JSON.stringify(data.written));

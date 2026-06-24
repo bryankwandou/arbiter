@@ -4,8 +4,12 @@ import { createRequire } from "module";
 const require = createRequire(import.meta.url);
 const { neon } = require("../dashboard-web/node_modules/@neondatabase/serverless/index.js");
 
-const DB = process.env.DATABASE_URL ??
-  "postgresql://neondb_owner:npg_MLd9e6hQmgZa@ep-purple-cloud-aoc9zpro-pooler.c-2.ap-southeast-1.aws.neon.tech/neondb?channel_binding=require&sslmode=require";
+const DB = process.env.DATABASE_URL;
+if (!DB) {
+  console.error("ERROR: DATABASE_URL environment variable is required.");
+  console.error("Run: $env:DATABASE_URL='postgresql://...' ; node scripts/init-db.mjs");
+  process.exit(1);
+}
 
 const sql = neon(DB);
 

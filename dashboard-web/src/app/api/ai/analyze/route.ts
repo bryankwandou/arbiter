@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { applyRateLimit, sanitizeString, sanitizeNumber } from "@/lib/security";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 30;
@@ -7,50 +8,54 @@ const GROQ_API_URL = "https://api.groq.com/openai/v1/chat/completions";
 const MODEL = "llama-3.1-70b-versatile";
 
 export async function POST(req: NextRequest) {
-  const apiKey = process.env.GROQ_API_KEY;
+  // ── Rate limiting: 20/min per IP ─────────────────────────────────────────
+  const rl = applyRateLimit(req, 20, 60_000, "ai-analyze");
+  if (rl) return rl;
 
+  const apiKey = process.env.GROQ_API_KEY;
   if (!apiKey) {
-    return NextResponse.json(
-      {
-        summary: "AI analysis unavailable — GROQ_API_KEY not configured.",
-        risks: ["Set GROQ_API_KEY via: vercel env add GROQ_API_KEY"],
-        confidence: "low" as const,
-        recommendation: "paper",
-        unavailable: true,
-      },
-      { status: 200 }
-    );
+    return NextResponse.json({
+      summary: "AI analysis unavailable — GROQ_API_KEY not configured.",
+      risks: ["Set GROQ_API_KEY via: vercel env add GROQ_API_KEY"],
+      confidence: "low" as const,
+      recommendation: "paper",
+      unavailable: true,
+    });
   }
 
-  const body = await req.json().catch(() => ({}));
-  const { opportunity, stats } = body as {
-    opportunity?: {
-      question: string;
-      edge_pct: number;
-      depth_usd: number;
-      strategy: string;
-      venue: string;
-    };
-    stats?: {
-      bankroll_usd: number;
-      win_rate: number;
-      realized_pnl_total: number;
-    };
+  const rawBody = await req.json().catch(() => ({}));
+  const { opportunity, stats } = rawBody as {
+    opportunity?: Record<string, unknown>;
+    stats?: Record<string, unknown>;
   };
 
-  if (!opportunity) {
-    return NextResponse.json({ error: "opportunity required" }, { status: 400 });
+  if (!opportunity || typeof opportunity !== "object") {
+    return NextResponse.json({ error: "opportunity object required" }, { status: 400 });
   }
 
+  // ── Sanitize all user-provided values before inserting into LLM prompt ───
+  const question   = sanitizeString(opportunity.question, 300);
+  const strategy   = sanitizeString(opportunity.strategy, 50);
+  const edgePct    = sanitizeNumber(opportunity.edge_pct, 0, 1);
+  const depthUsd   = sanitizeNumber(opportunity.depth_usd, 0, 10_000_000);
+  const venue      = sanitizeString(opportunity.venue, 50);
+  const bankroll   = stats ? sanitizeNumber(stats.bankroll_usd, 0, 10_000_000) : null;
+  const winRate    = stats ? sanitizeNumber(stats.win_rate, 0, 1) : null;
+
+  if (!question) {
+    return NextResponse.json({ error: "opportunity.question is required" }, { status: 400 });
+  }
+
+  // ── Build prompt with sanitized values (no raw user input) ───────────────
   const prompt = `You are a quantitative risk analyst specializing in prediction market arbitrage.
 
 Analyze this Dutch book arbitrage opportunity:
-- Market: "${opportunity.question}"
-- Strategy: ${opportunity.strategy}
-- Edge: +${(opportunity.edge_pct * 100).toFixed(2)}% after 2% fee buffer
-- Liquidity: $${opportunity.depth_usd.toFixed(0)} USD
-- Venue: ${opportunity.venue}
-${stats ? `- Current bankroll: $${stats.bankroll_usd.toFixed(2)}\n- Win rate: ${(stats.win_rate * 100).toFixed(1)}%` : ""}
+- Market: ${JSON.stringify(question)}
+- Strategy: ${JSON.stringify(strategy)}
+- Edge: +${(edgePct * 100).toFixed(2)}% after 2% fee buffer
+- Liquidity: $${depthUsd.toFixed(0)} USD
+- Venue: ${JSON.stringify(venue)}
+${bankroll !== null ? `- Current bankroll: $${bankroll.toFixed(2)}\n- Win rate: ${((winRate ?? 0) * 100).toFixed(1)}%` : ""}
 
 Respond in JSON only (no markdown):
 {
@@ -62,12 +67,9 @@ Respond in JSON only (no markdown):
 }
 
 Confidence: high if edge >5% and liquidity >$2000, medium if edge 3-5% or liquidity $500-2000, low otherwise.
-Recommendation: always "paper" in paper mode unless liquidity is critically thin (<$200) or market closes in <1 hour.`;
+Recommendation: always "paper" in paper mode unless liquidity critically thin (<$200) or market closes in <1 hour.`;
 
   try {
-    const ctrl = new AbortController();
-    const timeout = setTimeout(() => ctrl.abort(), 20_000);
-
     const res = await fetch(GROQ_API_URL, {
       method: "POST",
       headers: {
@@ -81,52 +83,45 @@ Recommendation: always "paper" in paper mode unless liquidity is critically thin
         max_tokens: 400,
         response_format: { type: "json_object" },
       }),
-      signal: ctrl.signal,
+      signal: AbortSignal.timeout(20_000),
     });
 
-    clearTimeout(timeout);
-
     if (!res.ok) {
-      const err = await res.text();
-      return NextResponse.json(
-        {
-          summary: "AI analysis failed — Groq API error.",
-          risks: [`HTTP ${res.status}: ${err.slice(0, 100)}`],
-          confidence: "low" as const,
-          recommendation: "paper",
-          unavailable: true,
-        },
-        { status: 200 }
-      );
+      // Don't leak full Groq error to client
+      console.error("[ai/analyze] Groq HTTP", res.status);
+      return NextResponse.json({
+        summary: "AI analysis temporarily unavailable.",
+        risks: ["Groq API error — scanner is running normally"],
+        confidence: "low" as const,
+        recommendation: "paper",
+        unavailable: true,
+      });
     }
 
     const data = await res.json();
     const content = data.choices?.[0]?.message?.content ?? "{}";
-    const parsed = JSON.parse(content);
+
+    let parsed: Record<string, unknown> = {};
+    try { parsed = JSON.parse(content); } catch { /* use defaults */ }
 
     return NextResponse.json(
       {
-        summary: parsed.summary ?? "Analysis complete.",
-        risks: Array.isArray(parsed.risks) ? parsed.risks.slice(0, 3) : [],
-        confidence: parsed.confidence ?? "medium",
-        recommendation: parsed.recommendation ?? "paper",
-        key_insight: parsed.key_insight,
-        model: MODEL,
+        summary:       sanitizeString(parsed.summary as string ?? "Analysis complete.", 500),
+        risks:         Array.isArray(parsed.risks) ? (parsed.risks as unknown[]).slice(0, 3).map(r => sanitizeString(r, 200)) : [],
+        confidence:    ["high", "medium", "low"].includes(String(parsed.confidence)) ? parsed.confidence : "medium",
+        recommendation:["paper", "pass"].includes(String(parsed.recommendation)) ? parsed.recommendation : "paper",
+        key_insight:   sanitizeString(parsed.key_insight as string ?? "", 300),
+        model:         MODEL,
       },
-      {
-        headers: { "Cache-Control": "no-store" },
-      }
+      { headers: { "Cache-Control": "no-store" } }
     );
-  } catch (err) {
-    return NextResponse.json(
-      {
-        summary: "AI analysis timed out. The market scanner is still running normally.",
-        risks: ["Network timeout connecting to Groq API"],
-        confidence: "low" as const,
-        recommendation: "paper",
-        unavailable: true,
-      },
-      { status: 200 }
-    );
+  } catch {
+    return NextResponse.json({
+      summary: "AI analysis timed out. Scanner is running normally.",
+      risks: ["Network timeout — Groq API unreachable"],
+      confidence: "low" as const,
+      recommendation: "paper",
+      unavailable: true,
+    });
   }
 }
