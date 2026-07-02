@@ -13,7 +13,7 @@ const { ethers, network, run } = require("hardhat");
 const ADDRESSES = {
   // Base Mainnet (chainId 8453)
   8453: {
-    aaveAddressesProvider: "0xe20fCBdBfFC4Dd138cE8b2E6FBb6CB49777ad64b",
+    aaveAddressesProvider: "0xE20fCBDBffc4Dd138CE8b2E6Fbb6cb49777AD64b",
     uniswapV3Router:       "0x2626664c2603336E57B271c5C0b26F421741e481",
     aerodromeRouter:       "0xcF77a3Ba9A5CA399B7c97c74d54e5b1Beb874E43",
   },

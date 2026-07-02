@@ -10,7 +10,7 @@ BASE_RPC_URL: str = os.getenv("BASE_RPC_URL", "https://mainnet.base.org")
 CHAIN_ID = 8453
 
 # ── Aave V3 on Base ──────────────────────────────────────────────────────────
-AAVE_POOL_ADDRESSES_PROVIDER = "0xe20fCBdBfFC4Dd138cE8b2E6FBb6CB49777ad64b"
+AAVE_POOL_ADDRESSES_PROVIDER = "0xE20fCBDBffc4Dd138CE8b2E6Fbb6cb49777AD64b"
 AAVE_POOL                    = "0xA238Dd80C259a72e81d7e4664a9801593F98d1c5"
 
 # ── Uniswap V3 on Base ───────────────────────────────────────────────────────

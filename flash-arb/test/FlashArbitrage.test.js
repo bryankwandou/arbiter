@@ -16,7 +16,7 @@ const { expect } = require("chai");
 const { ethers }  = require("hardhat");
 
 // ── Base mainnet constants ────────────────────────────────────────────────────
-const AAVE_PROVIDER  = "0xe20fCBdBfFC4Dd138cE8b2E6FBb6CB49777ad64b";
+const AAVE_PROVIDER  = "0xE20fCBDBffc4Dd138CE8b2E6Fbb6cb49777AD64b";
 const UNI_V3_ROUTER  = "0x2626664c2603336E57B271c5C0b26F421741e481";
 const AERODROME      = "0xcF77a3Ba9A5CA399B7c97c74d54e5b1Beb874E43";
 const USDC           = "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913";
@@ -32,8 +32,17 @@ describe("FlashArbitrage", function () {
 
   beforeEach(async function () {
     [owner, attacker] = await ethers.getSigners();
+    let provider = AAVE_PROVIDER;
+    if (!FORK) {
+      // Local network has no Aave — use a mock provider so the constructor's
+      // getPool() call succeeds.
+      const Mock = await ethers.getContractFactory("MockPoolAddressesProvider");
+      const mock = await Mock.deploy(owner.address);
+      await mock.waitForDeployment();
+      provider = await mock.getAddress();
+    }
     const Factory = await ethers.getContractFactory("FlashArbitrage");
-    contract = await Factory.deploy(AAVE_PROVIDER);
+    contract = await Factory.deploy(provider);
     await contract.waitForDeployment();
   });
 
