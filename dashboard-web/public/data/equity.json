@@ -1268,5 +1268,10 @@
     "ts": "2026-07-22T09:11:20.639Z",
     "bankroll": 1000,
     "pnl_cumulative": 0
+  },
+  {
+    "ts": "2026-07-22T11:21:40.689Z",
+    "bankroll": 1000,
+    "pnl_cumulative": 0
   }
 ]
