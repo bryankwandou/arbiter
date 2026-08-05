@@ -94,6 +94,8 @@ contract FlashArbitrage {
      *
      * @param asset        Token to borrow (e.g. USDC on Base)
      * @param amount       Amount to borrow (in asset decimals)
+     * @param intermediate Token held between the two legs (e.g. WETH). Router2
+     *                     is approved to spend this contract's balance of it.
      * @param router1      DEX router for buy leg (must be in approvedRouters)
      * @param calldata1    Pre-encoded call to router1 (exactInput / swapExact…)
      * @param router2      DEX router for sell leg
@@ -103,17 +105,19 @@ contract FlashArbitrage {
     function startArbitrage(
         address asset,
         uint256 amount,
+        address intermediate,
         address router1,
         bytes   calldata calldata1,
         address router2,
         bytes   calldata calldata2,
         uint256 minProfit
     ) external onlyOwner notPaused {
+        if (intermediate == address(0))  revert ZeroAddress();
         if (!approvedRouters[router1]) revert RouterNotApproved(router1);
         if (!approvedRouters[router2]) revert RouterNotApproved(router2);
 
         bytes memory params = abi.encode(
-            asset, router1, calldata1, router2, calldata2, minProfit
+            asset, intermediate, router1, calldata1, router2, calldata2, minProfit
         );
         POOL.flashLoanSimple(address(this), asset, amount, params, 0);
     }
@@ -136,12 +140,13 @@ contract FlashArbitrage {
 
         (
             address _asset,
+            address intermediate,
             address router1,
             bytes memory calldata1,
             address router2,
             bytes memory calldata2,
             uint256 minProfit
-        ) = abi.decode(params, (address, address, bytes, address, bytes, uint256));
+        ) = abi.decode(params, (address, address, address, bytes, address, bytes, uint256));
 
         uint256 totalOwed = amount + premium;
 
@@ -151,8 +156,13 @@ contract FlashArbitrage {
         if (!ok1) revert SwapFailed(1);
 
         // ── Leg 2: sell ─────────────────────────────────────────────────────
-        // Router2 gets whatever balance of intermediate token we hold now.
-        // The encoded calldata already specifies which token + amount to swap.
+        // Router2 pulls the intermediate token via transferFrom, so it needs an
+        // allowance for the balance leg 1 just produced. Without this the sell
+        // leg always reverts, which is what SwapFailed(2) used to mean here.
+        uint256 midBal = IERC20(intermediate).balanceOf(address(this));
+        if (midBal == 0) revert SwapFailed(1);
+        IERC20(intermediate).approve(router2, midBal);
+
         (bool ok2, ) = router2.call(calldata2);
         if (!ok2) revert SwapFailed(2);
 

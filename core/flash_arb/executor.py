@@ -194,6 +194,7 @@ class FlashArbExecutor:
             tx = await self._contract.functions.startArbitrage(
                 self._w3.to_checksum_address(opp.token_in),
                 opp.borrow_amount,
+                self._w3.to_checksum_address(opp.token_out),
                 self._w3.to_checksum_address(router1),
                 cd1,
                 self._w3.to_checksum_address(router2),
