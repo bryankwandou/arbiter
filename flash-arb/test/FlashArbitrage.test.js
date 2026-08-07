@@ -16,9 +16,15 @@ const { expect } = require("chai");
 const { ethers }  = require("hardhat");
 
 // ── Base mainnet constants ────────────────────────────────────────────────────
-const AAVE_PROVIDER  = "0xE20fCBDBffc4Dd138CE8b2E6Fbb6cb49777AD64b";
+const AAVE_PROVIDER  = "0xe20fCBdBfFC4Dd138cE8b2E6FBb6CB49777ad64D";
 const UNI_V3_ROUTER  = "0x2626664c2603336E57B271c5C0b26F421741e481";
 const AERODROME      = "0xcF77a3Ba9A5CA399B7c97c74d54e5b1Beb874E43";
+const UNI_V3_QUOTER  = "0x3d4e44Eb1374240CE5F1B871ab261CD16335B76a"; // QuoterV2
+
+// Offset of `amountIn` inside exactInput((bytes,address,uint256,uint256)) calldata:
+// 4 selector + 32 tuple offset + 32 path offset + 32 recipient. Mirrors
+// UNIV3_AMOUNT_IN_OFFSET in core/flash_arb/executor.py.
+const UNIV3_AMOUNT_IN_OFFSET = 100n;
 const USDC           = "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913";
 const WETH           = "0x4200000000000000000000000000000000000006";
 const USDC_WHALE     = "0x3304E22DDaa22bCdC5fCa2269b418046aE7b566A"; // USDC-rich address
@@ -31,6 +37,8 @@ describe("FlashArbitrage", function () {
   let contract, owner, attacker;
 
   beforeEach(async function () {
+    // Deploying against forked state has to fetch Aave's provider + pool code.
+    this.timeout(FORK ? 180_000 : 40_000);
     [owner, attacker] = await ethers.getSigners();
     let provider = AAVE_PROVIDER;
     if (!FORK) {
@@ -55,7 +63,7 @@ describe("FlashArbitrage", function () {
     it("reverts startArbitrage from non-owner", async function () {
       await expect(
         contract.connect(attacker).startArbitrage(
-          USDC, 1_000_000n, UNI_V3_ROUTER, "0x", UNI_V3_ROUTER, "0x", 0n
+          USDC, 1_000_000n, WETH, UNI_V3_ROUTER, "0x", UNI_V3_ROUTER, "0x", 0n, 0n
         )
       ).to.be.revertedWithCustomError(contract, "Unauthorized");
     });
@@ -63,7 +71,7 @@ describe("FlashArbitrage", function () {
     it("reverts startArbitrage for non-whitelisted router", async function () {
       await expect(
         contract.startArbitrage(
-          USDC, 1_000_000n, attacker.address, "0x", UNI_V3_ROUTER, "0x", 0n
+          USDC, 1_000_000n, WETH, attacker.address, "0x", UNI_V3_ROUTER, "0x", 0n, 0n
         )
       ).to.be.revertedWithCustomError(contract, "RouterNotApproved");
     });
@@ -73,7 +81,7 @@ describe("FlashArbitrage", function () {
       await contract.setPaused(true);
       await expect(
         contract.startArbitrage(
-          USDC, 1_000_000n, UNI_V3_ROUTER, "0x", UNI_V3_ROUTER, "0x", 0n
+          USDC, 1_000_000n, WETH, UNI_V3_ROUTER, "0x", UNI_V3_ROUTER, "0x", 0n, 0n
         )
       ).to.be.revertedWithCustomError(contract, "ContractPaused");
     });
@@ -89,66 +97,211 @@ describe("FlashArbitrage", function () {
       await contract.transferOwnership(attacker.address);
       expect(await contract.owner()).to.equal(attacker.address);
     });
+
+    it("rejects an amountIn offset that would write past calldata2", async function () {
+      await contract.addRouter(UNI_V3_ROUTER);
+      // calldata2 is 2 bytes, so patching 32 bytes at offset 4 would overrun it.
+      await expect(
+        contract.startArbitrage(
+          USDC, 1_000_000n, WETH, UNI_V3_ROUTER, "0x",
+          UNI_V3_ROUTER, "0x1234", 4n, 0n
+        )
+      ).to.be.revertedWithCustomError(contract, "BadAmountInOffset");
+    });
   });
 
   // ── Fork tests ───────────────────────────────────────────────────────────
   (FORK ? describe : describe.skip)("Live arb simulation (Base fork)", function () {
-    this.timeout(120_000);
+    // Each test replays a large swap against forked state; over a public RPC the
+    // first run is slow. Pin FORK_BLOCK to reuse hardhat's cache between runs.
+    this.timeout(600_000);
 
-    it("executes a simulated arb: USDC→WETH→USDC via different fee tiers", async function () {
-      // Setup: whitelist routers
+    // Base mainnet at any given block rarely holds a real cross-fee-tier arb, so
+    // we manufacture one: dump a large WETH position into the 0.30% pool, which
+    // makes WETH cheap there relative to the 0.05% pool. The bot then buys WETH
+    // in the dislocated pool and sells it in the healthy one. Every other part —
+    // the Aave V3 flash loan, both Uniswap V3 swaps, the repayment — is real.
+    it("turns a real profit: borrow USDC, buy WETH cheap, sell dear, repay Aave", async function () {
       await contract.addRouter(UNI_V3_ROUTER);
-      await contract.addRouter(AERODROME);
-
       const addr = await contract.getAddress();
 
-      // ── Impersonate USDC whale to fund the contract with a tiny seed ──
-      await ethers.provider.send("hardhat_impersonateAccount", [USDC_WHALE]);
-      const whale = await ethers.getSigner(USDC_WHALE);
-      const usdcToken = await ethers.getContractAt(
-        ["function transfer(address,uint256) returns(bool)"],
-        USDC,
-        whale
+      const UniV3Router = await ethers.getContractAt([
+        "function exactInput((bytes path,address recipient,uint256 amountIn,uint256 amountOutMinimum) params) payable returns (uint256)"
+      ], UNI_V3_ROUTER);
+      const usdc = await ethers.getContractAt(
+        ["function balanceOf(address) view returns (uint256)"], USDC
       );
-      // Give contract 100 USDC as buffer (not needed for flash loan, just safety)
-      await usdcToken.transfer(addr, 100_000_000n); // 100 USDC (6 decimals)
 
-      // ── Build Uniswap V3 exactInput calldata for leg 1: USDC→WETH (0.05% fee) ──
-      const BORROW_USDC  = 10_000_000_000n; // 10,000 USDC
-      const pathBuy  = encodePath([USDC, WETH], [500]);    // 0.05% pool
-      const pathSell = encodePath([WETH, USDC], [3000]);   // 0.30% pool
+      // ── Manufacture the dislocation ─────────────────────────────────────────
+      // Mint ourselves ETH, wrap it, and sell a wall of WETH into the 0.30% pool.
+      await ethers.provider.send("hardhat_setBalance", [
+        owner.address, "0x" + (60_000n * 10n ** 18n).toString(16),
+      ]);
+      const weth = await ethers.getContractAt([
+        "function deposit() payable",
+        "function approve(address,uint256) returns (bool)",
+        "function balanceOf(address) view returns (uint256)",
+      ], WETH);
+
+      const DUMP = 20_000n * 10n ** 18n;         // 20,000 WETH
+      await weth.deposit({ value: DUMP });
+      await weth.approve(UNI_V3_ROUTER, DUMP);
+      await UniV3Router.exactInput({
+        path:             encodePath([WETH, USDC], [3000]),
+        recipient:        owner.address,
+        amountIn:         DUMP,
+        amountOutMinimum: 0n,
+      });
+
+      // ── Quote both legs so leg 2's amountIn matches what leg 1 will produce ──
+      const quoter = await ethers.getContractAt([
+        "function quoteExactInput(bytes path, uint256 amountIn) returns (uint256 amountOut, uint160[] sqrtPriceX96AfterList, uint32[] initializedTicksCrossedList, uint256 gasEstimate)"
+      ], UNI_V3_QUOTER);
+
+      const BORROW_USDC = 10_000_000_000n;                    // 10,000 USDC
+      const pathBuy     = encodePath([USDC, WETH], [3000]);   // cheap WETH (dumped pool)
+      const pathSell    = encodePath([WETH, USDC], [500]);    // dear WETH (healthy pool)
+
+      const [wethOut] = await quoter.quoteExactInput.staticCall(pathBuy, BORROW_USDC);
+      const [usdcOut] = await quoter.quoteExactInput.staticCall(pathSell, wethOut);
+
+      const owed = BORROW_USDC + (BORROW_USDC * 5n) / 10_000n; // + Aave 5bps premium
+      console.log(
+        `  leg1: 10,000 USDC -> ${ethers.formatEther(wethOut)} WETH\n` +
+        `  leg2: -> ${(Number(usdcOut) / 1e6).toFixed(2)} USDC | owed ${(Number(owed) / 1e6).toFixed(2)}`
+      );
+      expect(usdcOut).to.be.gt(owed, "no arb was manufactured — adjust DUMP size");
+
+      const calldata1 = UniV3Router.interface.encodeFunctionData("exactInput", [{
+        path: pathBuy,  recipient: addr, amountIn: BORROW_USDC, amountOutMinimum: 1n,
+      }]);
+      const calldata2 = UniV3Router.interface.encodeFunctionData("exactInput", [{
+        path: pathSell, recipient: addr, amountIn: wethOut,     amountOutMinimum: 1n,
+      }]);
+
+      // ── Execute, demanding a real profit floor (not 0) ───────────────────────
+      const minProfit = 1_000_000n; // insist on >= $1 net after repaying Aave
+      const before = await usdc.balanceOf(addr);
+
+      await expect(
+        contract.startArbitrage(
+          USDC, BORROW_USDC, WETH, UNI_V3_ROUTER, calldata1,
+          UNI_V3_ROUTER, calldata2, UNIV3_AMOUNT_IN_OFFSET, minProfit
+        )
+      ).to.emit(contract, "ArbitrageExecuted");
+
+      const after = await usdc.balanceOf(addr);
+      const profit = after - before;
+      console.log(`✓ flash loan repaid, net profit kept: $${(Number(profit) / 1e6).toFixed(2)} USDC`);
+
+      expect(profit).to.be.gte(minProfit);
+
+      // Profit is withdrawable by the owner — the full autonomous cycle.
+      await contract.withdrawToken(USDC, profit);
+      expect(await usdc.balanceOf(addr)).to.equal(0n);
+    });
+
+    it("enforces the profit floor: reverts when the arb is not profitable enough", async function () {
+      await contract.addRouter(UNI_V3_ROUTER);
+      const addr = await contract.getAddress();
 
       const UniV3Router = await ethers.getContractAt([
         "function exactInput((bytes path,address recipient,uint256 amountIn,uint256 amountOutMinimum) params) payable returns (uint256)"
       ], UNI_V3_ROUTER);
 
-      const deadline = Math.floor(Date.now() / 1000) + 300;
-
+      const BORROW_USDC = 10_000_000_000n;
       const calldata1 = UniV3Router.interface.encodeFunctionData("exactInput", [{
-        path:                pathBuy,
-        recipient:           addr,
-        amountIn:            BORROW_USDC,
-        amountOutMinimum:    1n,
+        path: encodePath([USDC, WETH], [500]), recipient: addr,
+        amountIn: BORROW_USDC, amountOutMinimum: 1n,
       }]);
-
-      // Need WETH balance after leg 1 for leg 2 — the executor.py handles this dynamically.
-      // In this test we set amountOutMinimum=1 and minProfit=0 (we just test the flow works).
       const calldata2 = UniV3Router.interface.encodeFunctionData("exactInput", [{
-        path:                pathSell,
-        recipient:           addr,
-        amountIn:            0n,  // bot fills this dynamically; test uses 0 to skip swap2
-        amountOutMinimum:    1n,
+        path: encodePath([WETH, USDC], [3000]), recipient: addr,
+        amountIn: 1n, amountOutMinimum: 1n,
       }]);
 
-      // This will likely revert (no real arb between fee tiers in a fork at current block)
-      // The test verifies the revert is from InsufficientProfit (arb logic ran), NOT a config error.
+      // Untouched pools: the round trip loses the two swap fees, so the guard fires.
       await expect(
         contract.startArbitrage(
-          USDC, BORROW_USDC, UNI_V3_ROUTER, calldata1, UNI_V3_ROUTER, calldata2, 0n
+          USDC, BORROW_USDC, WETH, UNI_V3_ROUTER, calldata1,
+          UNI_V3_ROUTER, calldata2, UNIV3_AMOUNT_IN_OFFSET, 1_000_000n
         )
-      ).to.be.reverted; // acceptable — no real arb at this block
+      ).to.be.reverted;
 
-      console.log("✓ Flash loan arb flow reached profit-check gate (reverted at InsufficientProfit or SwapFailed as expected)");
+      console.log("✓ unprofitable arb rejected before Aave repayment");
     });
+
+    // Regression guard for the failure mode the offset patch exists to remove:
+    // the bot quotes leg 2, the pool moves, and the encoded amountIn is now more
+    // of the intermediate token than leg 1 actually produced.
+    it("survives a stale leg-2 quote by patching amountIn to the real balance", async function () {
+      await contract.addRouter(UNI_V3_ROUTER);
+      const addr = await contract.getAddress();
+
+      const UniV3Router = await ethers.getContractAt([
+        "function exactInput((bytes path,address recipient,uint256 amountIn,uint256 amountOutMinimum) params) payable returns (uint256)"
+      ], UNI_V3_ROUTER);
+      const usdc = await ethers.getContractAt(
+        ["function balanceOf(address) view returns (uint256)"], USDC
+      );
+
+      // Smaller dislocation than the profit test on purpose: this test runs the
+      // arb twice, and each swap over a dislocated pool crosses many initialized
+      // ticks, which is what makes a forked run expensive in RPC round-trips.
+      await ethers.provider.send("hardhat_setBalance", [
+        owner.address, "0x" + (6_000n * 10n ** 18n).toString(16),
+      ]);
+      const weth = await ethers.getContractAt([
+        "function deposit() payable",
+        "function approve(address,uint256) returns (bool)",
+      ], WETH);
+      const DUMP = 2_000n * 10n ** 18n;
+      await weth.deposit({ value: DUMP });
+      await weth.approve(UNI_V3_ROUTER, DUMP);
+      await UniV3Router.exactInput({
+        path: encodePath([WETH, USDC], [3000]), recipient: owner.address,
+        amountIn: DUMP, amountOutMinimum: 0n,
+      });
+
+      const quoter = await ethers.getContractAt([
+        "function quoteExactInput(bytes path, uint256 amountIn) returns (uint256 amountOut, uint160[] sqrtPriceX96AfterList, uint32[] initializedTicksCrossedList, uint256 gasEstimate)"
+      ], UNI_V3_QUOTER);
+
+      const BORROW_USDC = 1_000_000_000n; // 1,000 USDC
+      const pathBuy  = encodePath([USDC, WETH], [3000]);
+      const pathSell = encodePath([WETH, USDC], [500]);
+      const [wethOut] = await quoter.quoteExactInput.staticCall(pathBuy, BORROW_USDC);
+
+      const calldata1 = UniV3Router.interface.encodeFunctionData("exactInput", [{
+        path: pathBuy, recipient: addr, amountIn: BORROW_USDC, amountOutMinimum: 1n,
+      }]);
+      // Deliberately stale: claim leg 1 will yield 10% more WETH than it will.
+      const stale = (wethOut * 110n) / 100n;
+      const calldata2 = UniV3Router.interface.encodeFunctionData("exactInput", [{
+        path: pathSell, recipient: addr, amountIn: stale, amountOutMinimum: 1n,
+      }]);
+
+      // Without the patch this reverts: router2 pulls `stale` > our balance.
+      await expect(
+        contract.startArbitrage(
+          USDC, BORROW_USDC, WETH, UNI_V3_ROUTER, calldata1,
+          UNI_V3_ROUTER, calldata2, 0n, 1n
+        )
+      ).to.be.reverted;
+
+      // With the patch the real balance is substituted and the arb completes.
+      // The floor is nominal here — profitability is covered by the test above;
+      // this one is about the sell leg surviving a quote that went stale.
+      await expect(
+        contract.startArbitrage(
+          USDC, BORROW_USDC, WETH, UNI_V3_ROUTER, calldata1,
+          UNI_V3_ROUTER, calldata2, UNIV3_AMOUNT_IN_OFFSET, 1n
+        )
+      ).to.emit(contract, "ArbitrageExecuted");
+
+      const profit = await usdc.balanceOf(addr);
+      console.log(`✓ stale quote (+10%) absorbed, profit still $${(Number(profit) / 1e6).toFixed(2)} USDC`);
+      expect(profit).to.be.gt(0n);
+    });
+
   });
 });

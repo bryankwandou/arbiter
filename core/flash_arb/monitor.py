@@ -11,6 +11,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import os
 import time
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
@@ -26,6 +27,31 @@ log = logging.getLogger(__name__)
 
 STATE_PATH = Path(__file__).resolve().parents[2] / "storage" / "flash_arb_state.json"
 
+# When ATLAS_GATE=1 the bot only executes while ATLAS-QUANT's T1MO regime is
+# risk-on. Read-only: nothing is written back to the ATLAS-QUANT project.
+ATLAS_GATE = os.getenv("ATLAS_GATE", "0") == "1"
+
+
+async def _atlas_regime() -> Optional[dict]:
+    """Fetch the ATLAS-QUANT regime. Returns None when the bridge is unreachable."""
+    try:
+        from core.atlas.client import fetch_signals
+
+        sigs = await fetch_signals()
+        if not sigs:
+            return None
+        return {
+            "risk_on": any(s.risk_on for s in sigs),
+            "signals": [
+                {"symbol": s.symbol, "action": s.action, "badge": s.badge,
+                 "bull_prob": s.bull_prob, "confidence": s.confidence}
+                for s in sigs
+            ],
+        }
+    except Exception as e:
+        log.warning("ATLAS-QUANT bridge unavailable: %s", e)
+        return None
+
 
 @dataclass
 class ScanResult:
@@ -36,6 +62,7 @@ class ScanResult:
     best_edge_pct: float
     total_profit_usd: float
     errors: int
+    atlas: Optional[dict] = None
 
 
 class FlashArbMonitor:
@@ -115,8 +142,22 @@ class FlashArbMonitor:
         # Sort by net profit descending
         all_opps.sort(key=lambda o: o.net_profit_usd, reverse=True)
 
+        # ATLAS-QUANT autopilot gate — consult the T1MO regime before committing
+        # capital. A missing/unreachable bridge is fail-open (arb is market-neutral).
+        atlas = await _atlas_regime()
+        if atlas:
+            log.info(
+                "ATLAS-QUANT regime: risk_on=%s | %s",
+                atlas["risk_on"],
+                ", ".join(f"{s['symbol']}={s['action']}({s['bull_prob']:.0f})"
+                          for s in atlas["signals"]),
+            )
+        gated = ATLAS_GATE and atlas is not None and not atlas["risk_on"]
+        if gated and all_opps:
+            log.info("⛔ ATLAS gate: regime risk-off — holding %d opportunity(s)", len(all_opps))
+
         # Execute best opportunity if it exists
-        for opp in all_opps[:1]:
+        for opp in ([] if gated else all_opps[:1]):
             tx_hash = await self._executor.execute(opp)
             executions.append({
                 "ts":             ts,
@@ -154,6 +195,7 @@ class FlashArbMonitor:
             best_edge_pct=round(best_edge * 100, 4),
             total_profit_usd=round(total_profit, 4),
             errors=errors,
+            atlas=atlas,
         )
 
         self._persist(result)
@@ -173,6 +215,7 @@ class FlashArbMonitor:
                     "best_edge_pct":    result.best_edge_pct,
                     "total_profit_usd": result.total_profit_usd,
                     "errors":           result.errors,
+                    "atlas":            result.atlas,
                 }, indent=2),
                 encoding="utf-8",
             )

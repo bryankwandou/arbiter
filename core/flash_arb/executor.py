@@ -78,6 +78,27 @@ def encode_aerodrome_swap(
     return selector + encoded
 
 
+# Byte offset of the `amountIn` word inside each router's calldata. The contract
+# overwrites that word with leg 1's real output, so a stale quote can no longer
+# make the sell leg ask for more of the intermediate token than we hold.
+#
+#   Uniswap V3 exactInput((bytes,address,uint256,uint256)):
+#     4 selector + 32 tuple offset + 32 path offset + 32 recipient = 100
+#   Aerodrome swapExactTokensForTokens(uint256 amountIn, ...):
+#     4 selector, amountIn is the first word = 4
+UNIV3_AMOUNT_IN_OFFSET     = 100
+AERODROME_AMOUNT_IN_OFFSET = 4
+
+
+def amount_in_offset(dex: str) -> int:
+    """Offset to patch for `dex`, or 0 to leave the calldata untouched."""
+    if dex.startswith("uniswap_v3"):
+        return UNIV3_AMOUNT_IN_OFFSET
+    if dex.startswith("aerodrome"):
+        return AERODROME_AMOUNT_IN_OFFSET
+    return 0
+
+
 def encode_approve(spender: str, amount: int) -> bytes:
     """ABI-encode ERC20.approve(spender, amount)."""
     selector = bytes.fromhex("095ea7b3")
@@ -169,6 +190,7 @@ class FlashArbExecutor:
         router2 = self._get_router(opp.sell_quote.dex)
         cd1     = self._build_leg_calldata(opp, 1)
         cd2     = self._build_leg_calldata(opp, 2)
+        off2    = amount_in_offset(opp.sell_quote.dex)
 
         # min_profit: 50% of calculated net profit in raw token units
         min_profit = opp.net_profit // 2
@@ -194,10 +216,12 @@ class FlashArbExecutor:
             tx = await self._contract.functions.startArbitrage(
                 self._w3.to_checksum_address(opp.token_in),
                 opp.borrow_amount,
+                self._w3.to_checksum_address(opp.token_out),
                 self._w3.to_checksum_address(router1),
                 cd1,
                 self._w3.to_checksum_address(router2),
                 cd2,
+                off2,
                 min_profit,
             ).build_transaction({
                 "from":     acct.address,
