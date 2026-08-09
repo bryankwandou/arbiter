@@ -63,10 +63,17 @@ async def report_to_dashboard(result: ScanResult) -> None:
 
 
 async def main() -> None:
+    # Read these off config, not the raw env: config resolves the per-network
+    # defaults, so logging the env directly reported mainnet while the bot was
+    # actually pointed at Sepolia.
+    from core.flash_arb import config
+
     log.info(
         "⚡ Flash Arb Bot starting",
-        rpc=os.getenv("BASE_RPC_URL", "https://mainnet.base.org"),
-        contract=os.getenv("FLASH_ARB_CONTRACT", "(not set — deploy first)"),
+        network=config.NETWORK,
+        chain_id=config.CHAIN_ID,
+        rpc=config.BASE_RPC_URL,
+        contract=config.FLASH_ARB_CONTRACT or "(not set — deploy first)",
         dry_run=os.getenv("FLASH_ARB_DRY_RUN", "1"),
         dashboard=DASHBOARD_URL,
     )

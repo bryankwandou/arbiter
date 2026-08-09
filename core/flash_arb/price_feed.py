@@ -45,9 +45,15 @@ class PriceFeed:
             address=self._w3.to_checksum_address(config.UNISWAP_V3_QUOTER),
             abi=QUOTER_V2_ABI,
         )
-        self._aero = self._w3.eth.contract(
-            address=self._w3.to_checksum_address(config.AERODROME_ROUTER),
-            abi=AERODROME_ROUTER_ABI,
+        # Aerodrome is Base-mainnet only. On networks without it the address is
+        # blank and the venue is simply skipped rather than failing construction.
+        self._aero = (
+            self._w3.eth.contract(
+                address=self._w3.to_checksum_address(config.AERODROME_ROUTER),
+                abi=AERODROME_ROUTER_ABI,
+            )
+            if config.AERODROME_ROUTER
+            else None
         )
 
     # ── Uniswap V3 ───────────────────────────────────────────────────────────
@@ -93,7 +99,9 @@ class PriceFeed:
     async def quote_aerodrome(
         self, token_in: str, token_out: str, amount_in: int, stable: bool = False
     ) -> Optional[Quote]:
-        """Quote an Aerodrome pool (volatile or stable)."""
+        """Quote an Aerodrome pool (volatile or stable), or None if unavailable."""
+        if self._aero is None:
+            return None
         try:
             routes = [{
                 "from":    self._w3.to_checksum_address(token_in),
