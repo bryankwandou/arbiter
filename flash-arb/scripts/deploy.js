@@ -33,9 +33,30 @@ async function main() {
 
   if (!addrs) throw new Error(`Unknown chainId: ${chainId}`);
 
+  const balance = await ethers.provider.getBalance(deployer.address);
+
   console.log(`\nDeploying FlashArbitrage on chain ${chainId}`);
   console.log(`Deployer: ${deployer.address}`);
-  console.log(`Balance:  ${ethers.formatEther(await ethers.provider.getBalance(deployer.address))} ETH\n`);
+  console.log(`Balance:  ${ethers.formatEther(balance)} ETH\n`);
+
+  // Fail here with something readable rather than deep inside estimateGas.
+  if (balance === 0n) {
+    const faucet = Number(chainId) === 84532
+      ? "https://www.alchemy.com/faucets/base-sepolia"
+      : "bridge ETH to Base";
+    throw new Error(
+      `${deployer.address} holds no ETH on chain ${chainId} — fund it first (${faucet})`
+    );
+  }
+
+  // The provider is the one address a typo makes unrecoverable: the constructor
+  // calls getPool() on it, and a wrong value yields a contract that can never
+  // borrow. Confirm something is actually deployed there before spending gas.
+  if ((await ethers.provider.getCode(addrs.aaveAddressesProvider)) === "0x") {
+    throw new Error(
+      `No contract at Aave provider ${addrs.aaveAddressesProvider} on chain ${chainId}`
+    );
+  }
 
   const Factory = await ethers.getContractFactory("FlashArbitrage");
   const contract = await Factory.deploy(addrs.aaveAddressesProvider);
