@@ -29,7 +29,7 @@ jobs:
           cache: pip
 
       - name: Install deps
-        run: pip install "web3>=7.0" httpx structlog
+        run: pip install "web3>=7.0" httpx structlog "psycopg[binary]"
 
       - name: Run one flash arb scan (dry run)
         run: python -m api.flash_server
@@ -38,4 +38,38 @@ jobs:
           FLASH_ARB_DRY_RUN: "1"
           BASE_RPC_URL: ${{ secrets.BASE_RPC_URL || 'https://mainnet.base.org' }}
           BOT_INTERNAL_SECRET: ${{ secrets.BOT_INTERNAL_SECRET }}
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
           DASHBOARD_URL: https://arbiterbot.vercel.app
+
+      # The dashboard POST is the only record this job used to leave, and it is
+      # silently dropped whenever the shared secret is missing on the Vercel
+      # side — which is how a month of scans vanished. The run summary is
+      # written from the state file the scan just produced, so each run carries
+      # its own evidence in the Actions UI regardless of the dashboard.
+      - name: Record scan result in the run summary
+        if: always()
+        run: |
+          python - <<'PY' >> "$GITHUB_STEP_SUMMARY"
+          import json, pathlib
+          p = pathlib.Path("storage/flash_arb_state.json")
+          if not p.exists():
+              print("## Flash arb scan\n\nNo state file — the scan did not complete.")
+              raise SystemExit(0)
+          s = json.loads(p.read_text())
+          print("## Flash arb scan\n")
+          print(f"- **Scanned at** {s.get('last_scan','?')}")
+          print(f"- **Pairs** {s.get('pairs_scanned',0)}  ·  "
+                f"**Opportunities** {len(s.get('opportunities',[]))}  ·  "
+                f"**Errors** {s.get('errors',0)}")
+          print(f"- **Best edge** {s.get('best_edge_pct',0):.4f}%")
+          atlas = s.get("atlas")
+          if atlas:
+              regime = "risk-on" if atlas.get("risk_on") else "risk-off"
+              names = ", ".join(
+                  f"{x['symbol']}={x['action']}({x['bull_prob']:.0f})"
+                  for x in atlas.get("signals", [])
+              )
+              print(f"- **ATLAS-QUANT** {regime} — {names}")
+          for o in s.get("opportunities", []):
+              print(f"\n  - {o}")
+          PY
