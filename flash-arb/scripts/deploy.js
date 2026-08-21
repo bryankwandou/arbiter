@@ -13,7 +13,7 @@ const { ethers, network, run } = require("hardhat");
 const ADDRESSES = {
   // Base Mainnet (chainId 8453)
   8453: {
-    aaveAddressesProvider: "0xE20fCBDBffc4Dd138CE8b2E6Fbb6cb49777AD64b",
+    aaveAddressesProvider: "0xe20fCBdBfFC4Dd138cE8b2E6FBb6CB49777ad64D",
     uniswapV3Router:       "0x2626664c2603336E57B271c5C0b26F421741e481",
     aerodromeRouter:       "0xcF77a3Ba9A5CA399B7c97c74d54e5b1Beb874E43",
   },
@@ -33,9 +33,30 @@ async function main() {
 
   if (!addrs) throw new Error(`Unknown chainId: ${chainId}`);
 
+  const balance = await ethers.provider.getBalance(deployer.address);
+
   console.log(`\nDeploying FlashArbitrage on chain ${chainId}`);
   console.log(`Deployer: ${deployer.address}`);
-  console.log(`Balance:  ${ethers.formatEther(await ethers.provider.getBalance(deployer.address))} ETH\n`);
+  console.log(`Balance:  ${ethers.formatEther(balance)} ETH\n`);
+
+  // Fail here with something readable rather than deep inside estimateGas.
+  if (balance === 0n) {
+    const faucet = Number(chainId) === 84532
+      ? "https://www.alchemy.com/faucets/base-sepolia"
+      : "bridge ETH to Base";
+    throw new Error(
+      `${deployer.address} holds no ETH on chain ${chainId} — fund it first (${faucet})`
+    );
+  }
+
+  // The provider is the one address a typo makes unrecoverable: the constructor
+  // calls getPool() on it, and a wrong value yields a contract that can never
+  // borrow. Confirm something is actually deployed there before spending gas.
+  if ((await ethers.provider.getCode(addrs.aaveAddressesProvider)) === "0x") {
+    throw new Error(
+      `No contract at Aave provider ${addrs.aaveAddressesProvider} on chain ${chainId}`
+    );
+  }
 
   const Factory = await ethers.getContractFactory("FlashArbitrage");
   const contract = await Factory.deploy(addrs.aaveAddressesProvider);

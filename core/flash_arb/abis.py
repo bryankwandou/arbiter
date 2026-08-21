@@ -138,10 +138,12 @@ FLASH_ARB_ABI = [
         "inputs": [
             {"internalType": "address", "name": "asset",      "type": "address"},
             {"internalType": "uint256", "name": "amount",     "type": "uint256"},
+            {"internalType": "address", "name": "intermediate", "type": "address"},
             {"internalType": "address", "name": "router1",    "type": "address"},
             {"internalType": "bytes",   "name": "calldata1",  "type": "bytes"},
             {"internalType": "address", "name": "router2",    "type": "address"},
             {"internalType": "bytes",   "name": "calldata2",  "type": "bytes"},
+            {"internalType": "uint256", "name": "amountInOffset2", "type": "uint256"},
             {"internalType": "uint256", "name": "minProfit",  "type": "uint256"},
         ],
         "name": "startArbitrage",
