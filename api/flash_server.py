@@ -38,6 +38,7 @@ log = structlog.get_logger()
 
 DASHBOARD_URL   = os.getenv("DASHBOARD_URL", "https://arbiterbot.vercel.app")
 BOT_SECRET      = os.getenv("BOT_INTERNAL_SECRET", "")
+DATABASE_URL    = os.getenv("DATABASE_URL", "")
 
 
 async def report_to_dashboard(result: ScanResult) -> None:
@@ -60,6 +61,54 @@ async def report_to_dashboard(result: ScanResult) -> None:
             )
     except Exception as e:
         log.warning("Failed to report to dashboard", error=str(e))
+
+
+def write_scan_to_db(result: ScanResult) -> None:
+    """Insert one scan row straight into Postgres.
+
+    The dashboard POST above is the original transport, but it authenticates
+    with a shared secret and silently drops the result whenever the two sides
+    disagree — a month of scans was lost that way without a single failed CI
+    run. Writing the row here removes the dashboard from the path entirely, so
+    a scan that ran is a scan that is recorded.
+
+    Best-effort by design: a scan that cannot be filed is still a scan that
+    happened, and the arb loop must not stop because a database is unreachable.
+    """
+    if not DATABASE_URL:
+        return
+    try:
+        import psycopg  # imported lazily so the bot runs without the driver
+
+        executions = result.executions
+        tx_hashes  = [str(e.get("tx_hash", "")) for e in executions if e.get("tx_hash")]
+        dry_run    = any(e.get("dry_run") is True for e in executions)
+
+        with psycopg.connect(DATABASE_URL, connect_timeout=15) as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    INSERT INTO flash_arb_scans
+                      (pairs_scanned, opps_found, best_edge_pct, total_profit_usd,
+                       executions, dry_run, tx_hashes, opportunities, errors)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    """,
+                    (
+                        result.pairs_scanned,
+                        len(result.opportunities),
+                        result.best_edge_pct,
+                        result.total_profit_usd,
+                        len(executions),
+                        dry_run,
+                        tx_hashes,
+                        json.dumps(result.opportunities),
+                        result.errors,
+                    ),
+                )
+            conn.commit()
+        log.info("Scan recorded in database", pairs=result.pairs_scanned)
+    except Exception as e:
+        log.warning("Failed to record scan in database", error=str(e))
 
 
 async def main() -> None:
@@ -85,6 +134,7 @@ async def main() -> None:
     async def _patched_scan() -> ScanResult:
         result = await _original_scan()
         await report_to_dashboard(result)
+        write_scan_to_db(result)
         return result
     monitor.scan_once = _patched_scan  # type: ignore[method-assign]
 
