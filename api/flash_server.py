@@ -45,12 +45,21 @@ DATABASE_URL    = os.getenv("DATABASE_URL", "")
 
 
 async def report_to_dashboard(result: ScanResult) -> None:
-    """POST scan results to /api/flash-arb for dashboard display."""
+    """POST scan results to /api/flash-arb for dashboard display.
+
+    The response used to be discarded. Only a thrown exception was logged, so
+    the endpoint could reject every POST with 401 and the run still finished
+    green with nothing in the log to read — which is exactly how a month of
+    scans went missing while CI reported success the whole time. A rejected
+    write is not an error the loop should stop for, but it is one somebody has
+    to be able to see.
+    """
     if not BOT_SECRET:
+        log.info("Dashboard POST skipped — BOT_INTERNAL_SECRET is not set")
         return
     try:
         async with httpx.AsyncClient(timeout=10.0) as client:
-            await client.post(
+            resp = await client.post(
                 f"{DASHBOARD_URL}/api/flash-arb",
                 headers={"x-bot-secret": BOT_SECRET, "Content-Type": "application/json"},
                 content=json.dumps({
@@ -62,8 +71,17 @@ async def report_to_dashboard(result: ScanResult) -> None:
                     "errors":           result.errors,
                 }),
             )
+        if resp.status_code >= 400:
+            log.warning(
+                "Dashboard rejected the scan",
+                status=resp.status_code,
+                url=f"{DASHBOARD_URL}/api/flash-arb",
+                body=resp.text[:200],
+            )
+        else:
+            log.info("Dashboard accepted the scan", status=resp.status_code)
     except Exception as e:
-        log.warning("Failed to report to dashboard", error=str(e))
+        log.warning("Failed to reach dashboard", error=str(e))
 
 
 def write_scan_to_db(result: ScanResult) -> None:
