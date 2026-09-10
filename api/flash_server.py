@@ -88,7 +88,7 @@ def write_scan_to_db(result: ScanResult) -> None:
         # Take the flag from the executor, not from the executions list. Derived
         # from the list, a scan that found nothing to execute had nothing to be
         # True, so `any(...)` collapsed to False and filed every dry run as if
-        # it had been live — the opposite of what happened, on the one column
+        # it had been live â€” the opposite of what happened, on the one column
         # that says whether real money was at risk.
         dry_run    = DRY_RUN
 
