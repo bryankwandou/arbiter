@@ -14,6 +14,8 @@ Environment variables required:
   FLASH_ARB_DRY_RUN     — Set to 0 for live execution (default: 1 = dry run)
   MIN_PROFIT_USD        — Minimum net profit to execute (default: 5.0)
   FLASH_SCAN_INTERVAL   — Seconds between scans (default: 30)
+  FLASH_ARB_ONCE        — Scan once and exit (for cron runners)
+  FLASH_ARB_BURST_SEC   — Keep scanning for this many seconds, then exit
   BOT_INTERNAL_SECRET   — Shared secret for posting results to /api/flash-arb
   DASHBOARD_URL         — Vercel deployment URL (for reporting)
 """
@@ -24,6 +26,7 @@ import asyncio
 import json
 import logging
 import os
+import time
 
 import httpx
 import structlog
@@ -149,6 +152,31 @@ async def main() -> None:
     # One-shot mode for cron runners (GitHub Actions): scan once, report, exit.
     if os.getenv("FLASH_ARB_ONCE", "0") == "1":
         await monitor.scan_once()
+        return
+
+    # Burst mode. A workflow declaring "*/10 * * * *" does not get 144 runs a
+    # day: GitHub throttles scheduled workflows and drops the rest without
+    # failing anything, and the measured delivery on this repo is about 8. A
+    # green run history says nothing about how often the market was looked at.
+    #
+    # How often the trigger fires is not ours to control. How much work each
+    # trigger does is: keep scanning for the life of the job instead of exiting
+    # after a single pass. Every pass still files its own database row, so the
+    # record stays one row per scan rather than one row per run.
+    burst_sec = int(os.getenv("FLASH_ARB_BURST_SEC", "0") or 0)
+    if burst_sec > 0:
+        deadline = time.monotonic() + burst_sec
+        scans = 0
+        while True:
+            await monitor.scan_once()
+            scans += 1
+            # Stop before a sleep that would outlast the window, so the job ends
+            # on a completed scan instead of being killed part-way through one.
+            if time.monotonic() + config.SCAN_INTERVAL_SEC >= deadline:
+                break
+            await asyncio.sleep(config.SCAN_INTERVAL_SEC)
+        log.info("Burst complete", scans=scans, window_sec=burst_sec,
+                 interval_sec=config.SCAN_INTERVAL_SEC)
         return
 
     await monitor.run()

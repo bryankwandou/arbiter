@@ -1,22 +1,37 @@
 name: Flash Arb Scanner (dry run)
 
-# 100% free 24/7 hosting: GitHub Actions cron, same pattern as paper-scan.yml.
-# Scans Base mainnet for flash-loan arb opportunities and reports them to the
-# dashboard (Neon) via POST /api/flash-arb. Always dry run — no tx is ever sent
-# from CI. Live execution stays a manual, local decision.
+# Free 24/7 hosting: GitHub Actions cron, same pattern as paper-scan.yml.
+# Scans Base mainnet for flash-loan arb opportunities and writes one row per
+# scan straight into Postgres; the dashboard POST is a best-effort extra that
+# nothing depends on. Always dry run — no tx is ever sent from CI. Live
+# execution stays a manual, local decision.
+
+# Cadence, measured rather than declared: this file used to ask for */10 and
+# GitHub delivered about 8 runs a day, not 144 — scheduled workflows are
+# throttled and the surplus is dropped silently. Asking every 10 minutes only
+# made the schedule a lie, so the cron now states a rate near what is actually
+# granted, and each granted run scans continuously for BURST minutes instead of
+# once. That turns ~8 scans a day into several hundred without pretending the
+# trigger fires more often than it does.
 
 on:
   schedule:
-    - cron: "*/10 * * * *"   # every 10 minutes, 24/7
+    - cron: "0 */2 * * *"    # roughly what GitHub actually grants a free repo
   workflow_dispatch:
 
 permissions:
   contents: read
 
+# One burst at a time. A queued duplicate would scan the same pairs twice and
+# file duplicate rows; letting the running burst finish is the useful choice.
+concurrency:
+  group: flash-arb-scan
+  cancel-in-progress: false
+
 jobs:
   scan:
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 30
 
     steps:
       - uses: actions/checkout@v4
@@ -31,10 +46,11 @@ jobs:
       - name: Install deps
         run: pip install "web3>=7.0" httpx structlog "psycopg[binary]"
 
-      - name: Run one flash arb scan (dry run)
+      - name: Scan continuously for 25 minutes (dry run)
         run: python -m api.flash_server
         env:
-          FLASH_ARB_ONCE: "1"
+          FLASH_ARB_BURST_SEC: "1500"     # 25 min, inside the 30 min job timeout
+          FLASH_SCAN_INTERVAL: "30"       # ~50 scans per run, each its own row
           FLASH_ARB_DRY_RUN: "1"
           BASE_RPC_URL: ${{ secrets.BASE_RPC_URL || 'https://mainnet.base.org' }}
           BOT_INTERNAL_SECRET: ${{ secrets.BOT_INTERNAL_SECRET }}
