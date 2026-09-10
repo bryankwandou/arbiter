@@ -80,9 +80,17 @@ def write_scan_to_db(result: ScanResult) -> None:
     try:
         import psycopg  # imported lazily so the bot runs without the driver
 
+        from core.flash_arb.executor import DRY_RUN
+
         executions = result.executions
         tx_hashes  = [str(e.get("tx_hash", "")) for e in executions if e.get("tx_hash")]
-        dry_run    = any(e.get("dry_run") is True for e in executions)
+
+        # Take the flag from the executor, not from the executions list. Derived
+        # from the list, a scan that found nothing to execute had nothing to be
+        # True, so `any(...)` collapsed to False and filed every dry run as if
+        # it had been live — the opposite of what happened, on the one column
+        # that says whether real money was at risk.
+        dry_run    = DRY_RUN
 
         with psycopg.connect(DATABASE_URL, connect_timeout=15) as conn:
             with conn.cursor() as cur:
