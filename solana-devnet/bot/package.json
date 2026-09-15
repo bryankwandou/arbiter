@@ -1,0 +1,9 @@
+{
+  "name": "arbiter-solana-devnet-bot",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@solana/spl-token": "^0.4.13",
+    "@solana/web3.js": "^1.98.4"
+  }
+}

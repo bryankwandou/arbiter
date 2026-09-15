@@ -1,0 +1,73 @@
+# Solana DEVNET flash-loan arbitrage bot — autonomous bursts.
+#
+# Same cadence story as flash-scan.yml: GitHub grants scheduled runs far less
+# often than a cron asks, so each granted run trades for ~25 minutes instead
+# of once. Devnet only — the program, tokens and pools are test fixtures, and
+# the price gaps between cycles come from a labelled "simulated market flow"
+# step, not from real traders.
+#
+# Every cycle reads ATLAS-QUANT's T1MO signal over HTTP (read-only) and logs it.
+# Set repository variable ATLAS_GATE=1 to trade only while the regime is risk-on.
+
+name: Solana devnet bot
+
+on:
+  schedule:
+    - cron: "30 */2 * * *"
+  workflow_dispatch:
+
+concurrency:
+  group: solana-devnet-bot
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  trade:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    defaults:
+      run:
+        working-directory: solana-devnet/bot
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - run: npm ci --no-audit --no-fund
+
+      - name: Load devnet bot keypair
+        env:
+          SOLANA_DEVNET_BOT_KEYPAIR: ${{ secrets.SOLANA_DEVNET_BOT_KEYPAIR }}
+        run: |
+          if [ -z "$SOLANA_DEVNET_BOT_KEYPAIR" ]; then
+            echo "::error::SOLANA_DEVNET_BOT_KEYPAIR secret is empty — refusing to report a green run that traded nothing"
+            exit 1
+          fi
+          umask 077
+          printf '%s' "$SOLANA_DEVNET_BOT_KEYPAIR" > "$RUNNER_TEMP/bot.json"
+
+      - name: Trade autonomously for 25 minutes
+        env:
+          BOT_KEYPAIR: ${{ runner.temp }}/bot.json
+          ATLAS_GATE: ${{ vars.ATLAS_GATE || '0' }}
+        run: node bot.js --loop 30 --noise --cycles 45 | tee run.log
+
+      - name: Summary
+        if: always()
+        run: |
+          {
+            echo "### Solana devnet bot"
+            echo "- cycles: $(grep -c '^#' run.log || true)"
+            echo "- executed flash arbs: $(grep -c 'flash arb executed' run.log || true)"
+            echo "- reverted: $(grep -c 'reverted' run.log || true)"
+            echo "- held by ATLAS gate: $(grep -c 'ATLAS gate' run.log || true)"
+            echo
+            echo '```'
+            grep -E 'ATLAS risk_on|executed|reverted|holding' run.log | tail -12
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+          rm -f "$RUNNER_TEMP/bot.json"
