@@ -1,0 +1,4 @@
+target/
+node_modules/
+bot/bot-keypair.json
+bot/*.jsonl
