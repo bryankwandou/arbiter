@@ -21,7 +21,7 @@ concurrency:
   cancel-in-progress: false
 
 permissions:
-  contents: read
+  contents: write   # commits the public run ledger the ATLAS-QUANT panel reads
 
 jobs:
   trade:
@@ -55,6 +55,18 @@ jobs:
           BOT_KEYPAIR: ${{ runner.temp }}/bot.json
           ATLAS_GATE: ${{ vars.ATLAS_GATE || '0' }}
         run: node bot.js --loop 30 --noise --cycles 45 | tee run.log
+
+      - name: Publish run ledger
+        if: always()
+        run: |
+          [ -f ledger.json ] || exit 0
+          git config user.name  "arbiter-bot"
+          git config user.email "bot@users.noreply.github.com"
+          git add ledger.json
+          git diff --cached --quiet && exit 0
+          git commit -m "ledger: devnet run ${GITHUB_RUN_ID} [skip vercel]"
+          git pull --rebase --autostash origin "${GITHUB_REF_NAME}" || true
+          git push origin "HEAD:${GITHUB_REF_NAME}"
 
       - name: Summary
         if: always()

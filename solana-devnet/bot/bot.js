@@ -11,11 +11,12 @@
 //   node bot.js --loop 30 --noise      also push pool 1's price between cycles,
 //                                      standing in for other traders (labelled)
 //   ATLAS_GATE=1 node bot.js ...       only trade while ATLAS regime is risk-on
-import { appendFileSync } from "node:fs";
+import { appendFileSync, readFileSync, writeFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import { ComputeBudgetProgram, Transaction, sendAndConfirmTransaction } from "@solana/web3.js";
 import {
   connection, loadBot, loadState, poolReserves, swapOut, loanFee, tokenBalance,
-  flashBorrowIx, flashRepayIx, swapIx, explorer, fmt, LOG_PATH, vaultPda, vaultTokensPda,
+  flashBorrowIx, flashRepayIx, swapIx, explorer, fmt, LOG_PATH, vaultPda, vaultTokensPda, PROGRAM_ID,
 } from "./common.js";
 
 const args = process.argv.slice(2);
@@ -30,6 +31,58 @@ const MIN_EDGE_BPS = BigInt(process.env.MIN_EDGE_BPS || "10");        // net ≥
 const bot = loadBot();
 const st = loadState();
 const log = (o) => { appendFileSync(LOG_PATH, JSON.stringify({ t: new Date().toISOString(), ...o }) + "\n"); };
+
+// Public run ledger. trades.jsonl is gitignored (it grows without bound and is
+// noisy); this is the small, committed summary the ATLAS-QUANT Risk panel reads
+// over HTTP. It holds no keys — only counts, realised profit and signatures
+// anyone can open on Solana Explorer.
+const LEDGER_PATH = fileURLToPath(new URL("./ledger.json", import.meta.url));
+
+function writeLedger() {
+  let prev = { runs: [] };
+  try { prev = JSON.parse(readFileSync(LEDGER_PATH, "utf8")); } catch { /* first run */ }
+  const run = {
+    startedAt: STARTED_AT,
+    endedAt: new Date().toISOString(),
+    runId: process.env.GITHUB_RUN_ID || null,
+    cycles: stats.cycles,
+    sent: stats.sent,
+    wins: stats.wins,
+    losses: stats.losses,
+    skipped: stats.skipped,
+    atlasReads: stats.atlasReads,
+    profit: fmt(stats.profit),
+    winRate: winRate(),
+    lastSig: stats.lastSig,
+  };
+  const runs = [...(prev.runs || []).filter((r) => !run.runId || r.runId !== run.runId), run].slice(-60);
+  const sum = (k) => runs.reduce((a, r) => a + (Number(r[k]) || 0), 0);
+  const sent = sum("sent"), wins = sum("wins");
+  const ledger = {
+    source: "arbiter/solana-devnet",
+    version: 1,
+    network: "devnet",
+    updatedAt: run.endedAt,
+    program: PROGRAM_ID.toBase58(),
+    vault: vaultPda(st.mintA).toBase58(),
+    wallet: bot.publicKey.toBase58(),
+    totals: {
+      runs: runs.length,
+      cycles: sum("cycles"),
+      sent,
+      wins,
+      losses: sum("losses"),
+      skipped: sum("skipped"),
+      atlasReads: sum("atlasReads"),
+      profit: runs.reduce((a, r) => a + Number(String(r.profit).replace(/,/g, "")), 0).toFixed(4),
+      winRate: sent ? `${((100 * wins) / sent).toFixed(1)}%` : "n/a",
+    },
+    latest: run,
+    runs,
+  };
+  writeFileSync(LEDGER_PATH, JSON.stringify(ledger, null, 2) + "\n");
+  console.log(`ledger written: ${LEDGER_PATH}`);
+}
 
 async function atlas() {
   try {
@@ -74,7 +127,9 @@ async function pushNoise() {
 }
 
 async function cycle(n) {
+  stats.cycles++;
   const regime = await atlas();
+  if (!regime.error) stats.atlasReads++;
   const [p0, p1] = await Promise.all([poolReserves(0), poolReserves(1)]);
   const price = (p) => Number(p.a) / Number(p.b);
   const [cheapId, dearId] = price(p0) <= price(p1) ? [0, 1] : [1, 0];
@@ -131,6 +186,7 @@ async function cycle(n) {
     if (realised > 0n) stats.wins++; else stats.losses++;
     stats.profit += realised;
     console.log(`   ${realised > 0n ? "✅" : "⚠️"} flash arb executed: realised ${realised >= 0n ? "+" : ""}${fmt(realised)} tUSD  ${explorer(sig)}`);
+    stats.lastSig = sig;
     log({ ...base, action: "executed", realised: fmt(realised), loan_fee: fmt(t.fee), sig });
   } catch (e) {
     stats.losses++;
@@ -140,7 +196,8 @@ async function cycle(n) {
   console.log(`   win rate ${winRate()}  (wins ${stats.wins} / sent ${stats.sent}, skipped before sending ${stats.skipped}, profit ${fmt(stats.profit)} tUSD)`);
 }
 
-const stats = { sent: 0, wins: 0, losses: 0, skipped: 0, profit: 0n };
+const STARTED_AT = new Date().toISOString();
+const stats = { cycles: 0, sent: 0, wins: 0, losses: 0, skipped: 0, atlasReads: 0, profit: 0n, lastSig: null };
 const winRate = () => (stats.sent ? `${((100 * stats.wins) / stats.sent).toFixed(1)}%` : "n/a");
 
 console.log(`Arbiter Solana devnet bot  wallet=${bot.publicKey.toBase58()}  vault=${vaultPda(st.mintA).toBase58()}  gate=${ATLAS_GATE}`);
@@ -153,4 +210,5 @@ for (let n = 1; n <= maxCycles; n++) {
 }
 console.log(`\nFINAL win rate ${winRate()}  wins=${stats.wins} losses=${stats.losses} sent=${stats.sent} skipped_before_send=${stats.skipped} profit=${fmt(stats.profit)} tUSD`);
 log({ kind: "final", ...stats, profit: fmt(stats.profit), win_rate: winRate() });
+try { writeLedger(); } catch (e) { console.log(`ledger write failed: ${e.message}`); }
 if (stats.sent >= 5 && stats.wins * 100 < stats.sent * 91) process.exitCode = 1; // below target → red run
