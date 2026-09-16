@@ -25,6 +25,7 @@ const maxCycles = args.includes("--cycles") ? Number(args[args.indexOf("--cycles
 const ATLAS_URL = (process.env.ATLAS_QUANT_URL || "https://atlas-quant.vercel.app").replace(/\/$/, "");
 const ATLAS_GATE = process.env.ATLAS_GATE === "1";
 const MIN_PROFIT = BigInt(process.env.MIN_PROFIT_BASE || "1000000"); // 1 tUSD
+const MIN_EDGE_BPS = BigInt(process.env.MIN_EDGE_BPS || "10");        // net ≥ 0.10% of loan
 
 const bot = loadBot();
 const st = loadState();
@@ -82,7 +83,11 @@ async function cycle(n) {
   console.log(`   pool0 ${price(p0).toFixed(4)}  pool1 ${price(p1).toFixed(4)}  best: borrow ${fmt(t.x)} tUSD → net ${fmt(t.net)} tUSD`);
 
   const base = { kind: "cycle", n, atlas: regime, price0: price(p0), price1: price(p1), size: fmt(t.x), expected_net: fmt(t.net) };
-  if (t.net < MIN_PROFIT) { console.log("   no profitable arb"); log({ ...base, action: "none" }); return; }
+  // Margin: a thin edge is the one most likely to vanish between quote and
+  // landing, so demand both an absolute floor and MIN_EDGE_BPS of the size.
+  if (t.net < MIN_PROFIT || t.net * 10_000n < t.x * MIN_EDGE_BPS) {
+    console.log("   no arb above margin"); log({ ...base, action: "none" }); return;
+  }
   if (ATLAS_GATE && !regime.riskOn) { console.log("   ⛔ ATLAS gate: risk-off — holding"); log({ ...base, action: "held_by_atlas" }); return; }
 
   const before = await tokenBalance(st.botA);
@@ -93,6 +98,27 @@ async function cycle(n) {
     swapIx(bot.publicKey, st.botA, st.botB, dearId, false, t.b, t.back),
     flashRepayIx(bot.publicKey, st.botA, st.mintA, t.x),
   );
+  tx.feePayer = bot.publicKey;
+
+  // Dry-run the exact transaction first. A trade that would fail is dropped
+  // here for free instead of landing on chain and burning a fee.
+  try {
+    tx.recentBlockhash = (await connection.getLatestBlockhash("confirmed")).blockhash;
+    const sim = await connection.simulateTransaction(tx, [bot]);
+    if (sim.value.err) {
+      stats.skipped++;
+      console.log(`   ⏭  simulation says it would fail — not sent (${JSON.stringify(sim.value.err)})`);
+      log({ ...base, action: "skipped_simulation", error: sim.value.err });
+      return;
+    }
+  } catch (e) {
+    stats.skipped++;
+    console.log(`   ⏭  could not simulate — not sent (${String(e.message).slice(0, 100)})`);
+    log({ ...base, action: "skipped_simulation", error: String(e.message).slice(0, 300) });
+    return;
+  }
+
+  stats.sent++;
   try {
     // Public devnet RPC occasionally loses the blockhash between fetch and send;
     // that transaction never reached the chain, so one fresh attempt is safe.
@@ -102,13 +128,20 @@ async function cycle(n) {
       return sendAndConfirmTransaction(connection, tx, [bot]);
     });
     const realised = (await tokenBalance(st.botA)) - before;
-    console.log(`   ✅ flash arb executed: realised +${fmt(realised)} tUSD  ${explorer(sig)}`);
+    if (realised > 0n) stats.wins++; else stats.losses++;
+    stats.profit += realised;
+    console.log(`   ${realised > 0n ? "✅" : "⚠️"} flash arb executed: realised ${realised >= 0n ? "+" : ""}${fmt(realised)} tUSD  ${explorer(sig)}`);
     log({ ...base, action: "executed", realised: fmt(realised), loan_fee: fmt(t.fee), sig });
   } catch (e) {
+    stats.losses++;
     console.log(`   ❌ reverted: ${String(e.message || e).slice(0, 160)}`);
     log({ ...base, action: "reverted", error: String(e.message || e).slice(0, 300) });
   }
+  console.log(`   win rate ${winRate()}  (wins ${stats.wins} / sent ${stats.sent}, skipped before sending ${stats.skipped}, profit ${fmt(stats.profit)} tUSD)`);
 }
+
+const stats = { sent: 0, wins: 0, losses: 0, skipped: 0, profit: 0n };
+const winRate = () => (stats.sent ? `${((100 * stats.wins) / stats.sent).toFixed(1)}%` : "n/a");
 
 console.log(`Arbiter Solana devnet bot  wallet=${bot.publicKey.toBase58()}  vault=${vaultPda(st.mintA).toBase58()}  gate=${ATLAS_GATE}`);
 console.log(`vault liquidity: ${fmt(await tokenBalance(vaultTokensPda(vaultPda(st.mintA))))} tUSD`);
@@ -118,3 +151,6 @@ for (let n = 1; n <= maxCycles; n++) {
   if (noise && n < maxCycles) { try { await pushNoise(); } catch (e) { console.log(`   noise error: ${e.message}`); } }
   if (n < maxCycles) await new Promise((r) => setTimeout(r, loopSec * 1000));
 }
+console.log(`\nFINAL win rate ${winRate()}  wins=${stats.wins} losses=${stats.losses} sent=${stats.sent} skipped_before_send=${stats.skipped} profit=${fmt(stats.profit)} tUSD`);
+log({ kind: "final", ...stats, profit: fmt(stats.profit), win_rate: winRate() });
+if (stats.sent >= 5 && stats.wins * 100 < stats.sent * 91) process.exitCode = 1; // below target → red run
