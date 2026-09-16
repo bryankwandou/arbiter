@@ -13,13 +13,28 @@ import {
   flashBorrowIx, flashRepayIx, swapIx, vaultPda, vaultTokensPda,
 } from "./common.js";
 
+// Public devnet RPC sometimes drops the blockhash between fetch and send. That
+// transaction never reached the chain, so re-sending it is safe, not a retry of
+// something that might already have landed.
+async function send(tx, signers) {
+  for (let i = 0; ; i++) {
+    try {
+      return await sendAndConfirmTransaction(connection, tx, signers);
+    } catch (e) {
+      if (i >= 3 || !/Blockhash not found/i.test(String(e.message))) throw e;
+      tx.recentBlockhash = undefined;
+      tx.signatures = [];
+    }
+  }
+}
+
 const bot = loadBot();
 const st = loadState();
 const vaultTokens = vaultTokensPda(vaultPda(st.mintA));
 const results = [];
 
 const fresh = Keypair.generate();
-await sendAndConfirmTransaction(connection, new Transaction().add(
+await send(new Transaction().add(
   SystemProgram.transfer({ fromPubkey: bot.publicKey, toPubkey: fresh.publicKey, lamports: 50_000_000 })), [bot]);
 const fA = (await getOrCreateAssociatedTokenAccount(connection, bot, st.mintA, fresh.publicKey)).address;
 const fB = (await getOrCreateAssociatedTokenAccount(connection, bot, st.mintB, fresh.publicKey)).address;
@@ -76,7 +91,7 @@ await expectFailOnChain("flash_borrow without flash_repay is refused", [
     results.push({ name: "profitable arb from 0-balance wallet", pass: null });
   } else {
     const vaultBefore = await tokenBalance(vaultTokens);
-    const sig = await sendAndConfirmTransaction(connection, new Transaction().add(
+    const sig = await send(new Transaction().add(
       ComputeBudgetProgram.setComputeUnitLimit({ units: 400_000 }),
       flashBorrowIx(fresh.publicKey, fA, st.mintA, x),
       swapIx(fresh.publicKey, fA, fB, cid, true, x, b),
