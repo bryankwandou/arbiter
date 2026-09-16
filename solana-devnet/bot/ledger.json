@@ -2,34 +2,34 @@
   "source": "arbiter/solana-devnet",
   "version": 1,
   "network": "devnet",
-  "updatedAt": "2026-09-16T11:03:59.482Z",
+  "updatedAt": "2026-09-16T12:16:49.300Z",
   "program": "C1RWmeDJxaLciy6puyjxWMWFBbo5DWSTtGWaMsvVdFF1",
   "vault": "6jRfCguQDUrSPjVmhHWR3ubBVynmimYkoUfPoShpu51m",
   "wallet": "9wz44FAspkPEgzKgAHnFPtKxEbSe877wZRbEqu6CsyET",
   "totals": {
-    "runs": 1,
-    "cycles": 6,
-    "sent": 4,
-    "wins": 4,
+    "runs": 2,
+    "cycles": 51,
+    "sent": 45,
+    "wins": 45,
     "losses": 0,
     "skipped": 0,
-    "atlasReads": 6,
-    "profit": "20.4386",
+    "atlasReads": 51,
+    "profit": "237.9622",
     "winRate": "100.0%"
   },
   "latest": {
-    "startedAt": "2026-09-16T11:01:05.236Z",
-    "endedAt": "2026-09-16T11:03:59.482Z",
-    "runId": null,
-    "cycles": 6,
-    "sent": 4,
-    "wins": 4,
+    "startedAt": "2026-09-16T11:52:53.727Z",
+    "endedAt": "2026-09-16T12:16:49.300Z",
+    "runId": "35092683475",
+    "cycles": 45,
+    "sent": 41,
+    "wins": 41,
     "losses": 0,
     "skipped": 0,
-    "atlasReads": 6,
-    "profit": "20.4386",
+    "atlasReads": 45,
+    "profit": "217.5236",
     "winRate": "100.0%",
-    "lastSig": "5G5ugob3SujKTjGAQsyVBJ42VH1vukEMf1UxhTUs1tH966My6vQJ68jDNpZLDcbqL2tHusdE2zgTzgbb2tk7BPSy"
+    "lastSig": "5v9ST6qzpvTqRsn2A9r8gX1rgSJDssU2NthEcY7ev6bVvbdSnAYGbz8A9rQWbf1wvMaNY2iXbbKgi9QkAXMW1bz8"
   },
   "runs": [
     {
@@ -45,6 +45,20 @@
       "profit": "20.4386",
       "winRate": "100.0%",
       "lastSig": "5G5ugob3SujKTjGAQsyVBJ42VH1vukEMf1UxhTUs1tH966My6vQJ68jDNpZLDcbqL2tHusdE2zgTzgbb2tk7BPSy"
+    },
+    {
+      "startedAt": "2026-09-16T11:52:53.727Z",
+      "endedAt": "2026-09-16T12:16:49.300Z",
+      "runId": "35092683475",
+      "cycles": 45,
+      "sent": 41,
+      "wins": 41,
+      "losses": 0,
+      "skipped": 0,
+      "atlasReads": 45,
+      "profit": "217.5236",
+      "winRate": "100.0%",
+      "lastSig": "5v9ST6qzpvTqRsn2A9r8gX1rgSJDssU2NthEcY7ev6bVvbdSnAYGbz8A9rQWbf1wvMaNY2iXbbKgi9QkAXMW1bz8"
     }
   ]
 }
