@@ -1,0 +1,9 @@
+{
+  "enabled": true,
+  "riskPct": 100,
+  "maxDailyLoss": 50,
+  "maxTradesPerDay": 500,
+  "cooldownSec": 0,
+  "updatedAt": "2026-09-17T00:00:00.000Z",
+  "updatedBy": "default"
+}

@@ -54,6 +54,8 @@ function writeLedger() {
     profit: fmt(stats.profit),
     winRate: winRate(),
     lastSig: stats.lastSig,
+    held: stats.held,
+    control,
   };
   const runs = [...(prev.runs || []).filter((r) => !run.runId || r.runId !== run.runId), run].slice(-60);
   const sum = (k) => runs.reduce((a, r) => a + (Number(r[k]) || 0), 0);
@@ -102,13 +104,14 @@ async function atlas() {
 }
 
 // Best input size for: A →(cheap pool) B →(dear pool) A, net of the loan fee.
-function bestTrade(cheap, dear) {
+function bestTrade(cheap, dear, cap) {
   const profit = (x) => {
     const b = swapOut(x, cheap.a, cheap.b);
     const back = swapOut(b, dear.b, dear.a);
     return { x, b, back, fee: loanFee(x), net: back - x - loanFee(x) };
   };
   let lo = 1n, hi = cheap.a / 4n; // ternary search on a concave curve
+  if (cap !== undefined && cap > 1n && cap < hi) hi = cap; // panel "risk per trade" ceiling
   for (let i = 0; i < 80 && hi - lo > 2n; i++) {
     const m1 = lo + (hi - lo) / 3n, m2 = hi - (hi - lo) / 3n;
     if (profit(m1).net < profit(m2).net) lo = m1; else hi = m2;
@@ -126,14 +129,56 @@ async function pushNoise() {
   log({ kind: "noise", pool: 0, sold_tsol: fmt(amt), sig });
 }
 
+// Operator controls, set from the ATLAS-QUANT Trade Bot panel. The panel
+// commits control.json to this repo; the bot re-reads it every cycle so a
+// kill switch or a new limit takes effect mid-run, not at the next run.
+const CONTROL_API = process.env.CONTROL_URL ||
+  "https://api.github.com/repos/bryankwandou/arbiter/contents/solana-devnet/bot/control.json?ref=main";
+const CONTROL_DEFAULT = { enabled: true, riskPct: 100, maxDailyLoss: 50, maxTradesPerDay: 500, cooldownSec: 0 };
+let control = { ...CONTROL_DEFAULT };
+async function readControl() {
+  try {
+    const headers = { Accept: "application/vnd.github.raw+json", "Cache-Control": "no-cache" };
+    if (process.env.GITHUB_TOKEN) headers.Authorization = `Bearer ${process.env.GITHUB_TOKEN}`;
+    const r = await fetch(CONTROL_API, { headers, signal: AbortSignal.timeout(8000) });
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    control = { ...CONTROL_DEFAULT, ...(await r.json()) };
+  } catch (e) {
+    // Remote unreachable: fall back to the checked-out copy, never to "trade freely".
+    try { control = { ...CONTROL_DEFAULT, ...JSON.parse(readFileSync(new URL("./control.json", import.meta.url), "utf8")) }; }
+    catch { console.log(`   control read failed (${e.message}) — keeping last settings`); }
+  }
+  return control;
+}
+
+// Today's totals from earlier runs, so daily limits span runs, not one run.
+const TODAY = new Date().toISOString().slice(0, 10);
+const earlierToday = (() => {
+  try {
+    const runs = JSON.parse(readFileSync(LEDGER_PATH, "utf8")).runs || [];
+    return runs.filter((r) => String(r.startedAt || "").startsWith(TODAY))
+      .reduce((a, r) => ({ sent: a.sent + (r.sent || 0), profit: a.profit + (Number(String(r.profit || 0).replace(/,/g, "")) || 0) }), { sent: 0, profit: 0 });
+  } catch { return { sent: 0, profit: 0 }; }
+})();
+let lastLossAt = 0;
+
 async function cycle(n) {
   stats.cycles++;
+  const c = await readControl();
+  const hold = (why, action) => { stats.held++; console.log(`\n#${n} ⛔ ${why} — holding`); log({ kind: "cycle", n, action, control: c }); };
+  if (!c.enabled) return hold("KILL SWITCH ON (ATLAS-QUANT panel)", "held_by_kill_switch");
+  const dayPnl = earlierToday.profit + Number(stats.profit) / 1e6;
+  if (dayPnl <= -Math.abs(Number(c.maxDailyLoss))) return hold(`max daily loss hit (${dayPnl.toFixed(4)} tUSD)`, "held_by_daily_loss");
+  if (earlierToday.sent + stats.sent >= Number(c.maxTradesPerDay)) return hold(`max trades/day reached (${c.maxTradesPerDay})`, "held_by_trade_cap");
+  if (lastLossAt && Date.now() - lastLossAt < Number(c.cooldownSec) * 1000) return hold(`cooldown after loss (${c.cooldownSec}s)`, "held_by_cooldown");
   const regime = await atlas();
   if (!regime.error) stats.atlasReads++;
   const [p0, p1] = await Promise.all([poolReserves(0), poolReserves(1)]);
   const price = (p) => Number(p.a) / Number(p.b);
   const [cheapId, dearId] = price(p0) <= price(p1) ? [0, 1] : [1, 0];
-  const t = bestTrade(cheapId === 0 ? p0 : p1, cheapId === 0 ? p1 : p0);
+  const riskPct = Math.min(100, Math.max(1, Number(c.riskPct) || 100));
+  const cap = (vaultLiquidity * BigInt(Math.round(riskPct * 100))) / 10_000n;
+  const t = bestTrade(cheapId === 0 ? p0 : p1, cheapId === 0 ? p1 : p0, cap);
   console.log(`\n#${n} ${new Date().toISOString()}  ATLAS risk_on=${regime.riskOn} ${regime.error ? "ERR " + regime.error : regime.signals.join(" | ")}`);
   console.log(`   pool0 ${price(p0).toFixed(4)}  pool1 ${price(p1).toFixed(4)}  best: borrow ${fmt(t.x)} tUSD → net ${fmt(t.net)} tUSD`);
 
@@ -183,13 +228,13 @@ async function cycle(n) {
       return sendAndConfirmTransaction(connection, tx, [bot]);
     });
     const realised = (await tokenBalance(st.botA)) - before;
-    if (realised > 0n) stats.wins++; else stats.losses++;
+    if (realised > 0n) stats.wins++; else { stats.losses++; lastLossAt = Date.now(); }
     stats.profit += realised;
     console.log(`   ${realised > 0n ? "✅" : "⚠️"} flash arb executed: realised ${realised >= 0n ? "+" : ""}${fmt(realised)} tUSD  ${explorer(sig)}`);
     stats.lastSig = sig;
     log({ ...base, action: "executed", realised: fmt(realised), loan_fee: fmt(t.fee), sig });
   } catch (e) {
-    stats.losses++;
+    stats.losses++; lastLossAt = Date.now();
     console.log(`   ❌ reverted: ${String(e.message || e).slice(0, 160)}`);
     log({ ...base, action: "reverted", error: String(e.message || e).slice(0, 300) });
   }
@@ -197,11 +242,13 @@ async function cycle(n) {
 }
 
 const STARTED_AT = new Date().toISOString();
-const stats = { cycles: 0, sent: 0, wins: 0, losses: 0, skipped: 0, atlasReads: 0, profit: 0n, lastSig: null };
+const stats = { cycles: 0, sent: 0, wins: 0, losses: 0, skipped: 0, atlasReads: 0, profit: 0n, lastSig: null, held: 0 };
 const winRate = () => (stats.sent ? `${((100 * stats.wins) / stats.sent).toFixed(1)}%` : "n/a");
 
 console.log(`Arbiter Solana devnet bot  wallet=${bot.publicKey.toBase58()}  vault=${vaultPda(st.mintA).toBase58()}  gate=${ATLAS_GATE}`);
-console.log(`vault liquidity: ${fmt(await tokenBalance(vaultTokensPda(vaultPda(st.mintA))))} tUSD`);
+const vaultLiquidity = await tokenBalance(vaultTokensPda(vaultPda(st.mintA)));
+console.log(`vault liquidity: ${fmt(vaultLiquidity)} tUSD`);
+console.log(`control (from ATLAS-QUANT panel): ${JSON.stringify(await readControl())}`);
 for (let n = 1; n <= maxCycles; n++) {
   try { await cycle(n); } catch (e) { console.log(`   cycle error: ${e.message}`); log({ kind: "error", n, error: String(e.message) }); }
   if (!loopSec) break;
