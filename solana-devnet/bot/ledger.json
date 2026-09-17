@@ -2,34 +2,34 @@
   "source": "arbiter/solana-devnet",
   "version": 1,
   "network": "devnet",
-  "updatedAt": "2026-09-16T21:53:41.882Z",
+  "updatedAt": "2026-09-17T01:07:48.905Z",
   "program": "C1RWmeDJxaLciy6puyjxWMWFBbo5DWSTtGWaMsvVdFF1",
   "vault": "6jRfCguQDUrSPjVmhHWR3ubBVynmimYkoUfPoShpu51m",
   "wallet": "9wz44FAspkPEgzKgAHnFPtKxEbSe877wZRbEqu6CsyET",
   "totals": {
-    "runs": 4,
-    "cycles": 141,
-    "sent": 121,
-    "wins": 121,
+    "runs": 5,
+    "cycles": 186,
+    "sent": 155,
+    "wins": 155,
     "losses": 0,
     "skipped": 0,
-    "atlasReads": 141,
-    "profit": "539.6947",
+    "atlasReads": 186,
+    "profit": "646.9181",
     "winRate": "100.0%"
   },
   "latest": {
-    "startedAt": "2026-09-16T21:29:59.872Z",
-    "endedAt": "2026-09-16T21:53:41.882Z",
-    "runId": "35152681807",
+    "startedAt": "2026-09-17T00:44:22.511Z",
+    "endedAt": "2026-09-17T01:07:48.905Z",
+    "runId": "35167752353",
     "cycles": 45,
-    "sent": 36,
-    "wins": 36,
+    "sent": 34,
+    "wins": 34,
     "losses": 0,
     "skipped": 0,
     "atlasReads": 45,
-    "profit": "141.7393",
+    "profit": "107.2234",
     "winRate": "100.0%",
-    "lastSig": "4zbzH8iod6rUwHWB8zJe9fdRkEYugjL5uWwNySjBRu2RFyZ6aTK24vbo61FcjBXpb55D66YKsdx4BtobaroDjGW"
+    "lastSig": "2esiZ7n8cxNeuzDqhcMBJn1bCN1WWmjW6poRHcZtzrwcYcannguiZpCpC3Lz8Wig4pxk1kAh5gV3zcL6sHpQiM9v"
   },
   "runs": [
     {
@@ -87,6 +87,20 @@
       "profit": "141.7393",
       "winRate": "100.0%",
       "lastSig": "4zbzH8iod6rUwHWB8zJe9fdRkEYugjL5uWwNySjBRu2RFyZ6aTK24vbo61FcjBXpb55D66YKsdx4BtobaroDjGW"
+    },
+    {
+      "startedAt": "2026-09-17T00:44:22.511Z",
+      "endedAt": "2026-09-17T01:07:48.905Z",
+      "runId": "35167752353",
+      "cycles": 45,
+      "sent": 34,
+      "wins": 34,
+      "losses": 0,
+      "skipped": 0,
+      "atlasReads": 45,
+      "profit": "107.2234",
+      "winRate": "100.0%",
+      "lastSig": "2esiZ7n8cxNeuzDqhcMBJn1bCN1WWmjW6poRHcZtzrwcYcannguiZpCpC3Lz8Wig4pxk1kAh5gV3zcL6sHpQiM9v"
     }
   ]
 }
