@@ -2,34 +2,44 @@
   "source": "arbiter/solana-devnet",
   "version": 1,
   "network": "devnet",
-  "updatedAt": "2026-09-17T01:07:48.905Z",
+  "updatedAt": "2026-09-17T08:17:02.879Z",
   "program": "C1RWmeDJxaLciy6puyjxWMWFBbo5DWSTtGWaMsvVdFF1",
   "vault": "6jRfCguQDUrSPjVmhHWR3ubBVynmimYkoUfPoShpu51m",
   "wallet": "9wz44FAspkPEgzKgAHnFPtKxEbSe877wZRbEqu6CsyET",
   "totals": {
-    "runs": 5,
-    "cycles": 186,
-    "sent": 155,
-    "wins": 155,
+    "runs": 6,
+    "cycles": 231,
+    "sent": 187,
+    "wins": 187,
     "losses": 0,
     "skipped": 0,
-    "atlasReads": 186,
-    "profit": "646.9181",
+    "atlasReads": 231,
+    "profit": "734.5491",
     "winRate": "100.0%"
   },
   "latest": {
-    "startedAt": "2026-09-17T00:44:22.511Z",
-    "endedAt": "2026-09-17T01:07:48.905Z",
-    "runId": "35167752353",
+    "startedAt": "2026-09-17T07:53:05.598Z",
+    "endedAt": "2026-09-17T08:17:02.879Z",
+    "runId": "35196752012",
     "cycles": 45,
-    "sent": 34,
-    "wins": 34,
+    "sent": 32,
+    "wins": 32,
     "losses": 0,
     "skipped": 0,
     "atlasReads": 45,
-    "profit": "107.2234",
+    "profit": "87.631",
     "winRate": "100.0%",
-    "lastSig": "2esiZ7n8cxNeuzDqhcMBJn1bCN1WWmjW6poRHcZtzrwcYcannguiZpCpC3Lz8Wig4pxk1kAh5gV3zcL6sHpQiM9v"
+    "lastSig": "618jfuqU6mWNrgtmfisXsQoYxJ24tNF58mEUdubGH3upYyHT7XaAzf7fCMASCkaRwzuxU9XY3wPExMYKAfWEUkNH",
+    "held": 0,
+    "control": {
+      "enabled": true,
+      "riskPct": 100,
+      "maxDailyLoss": 50,
+      "maxTradesPerDay": 500,
+      "cooldownSec": 0,
+      "updatedAt": "2026-09-17T00:00:00.000Z",
+      "updatedBy": "default"
+    }
   },
   "runs": [
     {
@@ -101,6 +111,30 @@
       "profit": "107.2234",
       "winRate": "100.0%",
       "lastSig": "2esiZ7n8cxNeuzDqhcMBJn1bCN1WWmjW6poRHcZtzrwcYcannguiZpCpC3Lz8Wig4pxk1kAh5gV3zcL6sHpQiM9v"
+    },
+    {
+      "startedAt": "2026-09-17T07:53:05.598Z",
+      "endedAt": "2026-09-17T08:17:02.879Z",
+      "runId": "35196752012",
+      "cycles": 45,
+      "sent": 32,
+      "wins": 32,
+      "losses": 0,
+      "skipped": 0,
+      "atlasReads": 45,
+      "profit": "87.631",
+      "winRate": "100.0%",
+      "lastSig": "618jfuqU6mWNrgtmfisXsQoYxJ24tNF58mEUdubGH3upYyHT7XaAzf7fCMASCkaRwzuxU9XY3wPExMYKAfWEUkNH",
+      "held": 0,
+      "control": {
+        "enabled": true,
+        "riskPct": 100,
+        "maxDailyLoss": 50,
+        "maxTradesPerDay": 500,
+        "cooldownSec": 0,
+        "updatedAt": "2026-09-17T00:00:00.000Z",
+        "updatedBy": "default"
+      }
     }
   ]
 }
