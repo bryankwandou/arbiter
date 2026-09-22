@@ -1,0 +1,58 @@
+# Mainnet flash-arb bot, back-to-back ~5.5 h runs.
+#
+# Security model: the signer here is a throwaway "hot" wallet
+# (2Zw7uAjSPpd8Cu2ZrdvCG2ptLo9FXsBTUxQea2bEFRWr) holding only fee SOL. It has
+# no authority over the program or the vault, every profit is swept to the
+# human wallet ETcQvsQek… right after it lands, and trades that would not end
+# above loan + fee + margin fail inside the transaction. A leaked secret can
+# lose at most the few thousandths of a SOL of gas money in that wallet.
+# The program's upgrade key (Zd2Cn5FZ…) never leaves the owner's machine.
+#
+# Only schedule / manual dispatch can run this, never pull requests, so a fork
+# cannot reach the secret.
+name: Solana mainnet bot
+
+on:
+  schedule:
+    - cron: "45 * * * *"
+  workflow_dispatch:
+
+concurrency:
+  group: solana-mainnet-bot
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  trade:
+    if: github.repository == 'bryankwandou/arbiter'
+    runs-on: ubuntu-latest
+    timeout-minutes: 350
+    defaults:
+      run:
+        working-directory: solana-devnet/bot
+    env:
+      SOLANA_RPC_URL: https://api.mainnet-beta.solana.com
+      ARBITER_PROGRAM_ID: 28fGF7iEvig3RRafbwbEMotT17Pb3BX9CqoxB6sSeNsM
+      PROFIT_SINK: ETcQvsQek2w9feLfsqoe4AypCWfnrSwQiv3djqocaP2m
+      BOT_KEYPAIR: ${{ runner.temp }}/hot.json
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - run: npm ci --ignore-scripts
+      - name: Write hot key
+        env:
+          KEY: ${{ secrets.SOLANA_MAINNET_HOT_KEYPAIR }}
+        run: |
+          test -n "$KEY" || { echo "::error::SOLANA_MAINNET_HOT_KEYPAIR secret is empty"; exit 1; }
+          umask 077; printf '%s' "$KEY" > "$BOT_KEYPAIR"
+      - name: Trade (~5.5 h)
+        run: timeout 19500 node mainnet.js --loop 20 || test $? -eq 124
+      - name: Wipe key
+        if: always()
+        run: rm -f "$BOT_KEYPAIR"

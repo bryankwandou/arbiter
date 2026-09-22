@@ -13,9 +13,14 @@ import { TOKEN_PROGRAM_ID } from "@solana/spl-token";
 const here = path.dirname(fileURLToPath(import.meta.url));
 
 export const RPC = process.env.SOLANA_RPC_URL || "https://api.devnet.solana.com";
-export const PROGRAM_ID = new PublicKey("C1RWmeDJxaLciy6puyjxWMWFBbo5DWSTtGWaMsvVdFF1");
+// ARBITER_PROGRAM_ID selects the Pinocchio build (programs-lite); it speaks the
+// same instructions, so every builder below works unchanged.
+export const PROGRAM_ID = new PublicKey(process.env.ARBITER_PROGRAM_ID || "C1RWmeDJxaLciy6puyjxWMWFBbo5DWSTtGWaMsvVdFF1");
+// Pools live in the Anchor program; the lite build has none on mainnet, where
+// swaps go to a real DEX. POOL_PROGRAM_ID keeps devnet swaps pointed there.
+export const POOL_PROGRAM_ID = new PublicKey(process.env.POOL_PROGRAM_ID || "C1RWmeDJxaLciy6puyjxWMWFBbo5DWSTtGWaMsvVdFF1");
 export const connection = new Connection(RPC, "confirmed");
-export const STATE_PATH = path.join(here, "state.json");
+export const STATE_PATH = process.env.ARBITER_STATE || path.join(here, "state.json");
 export const LOG_PATH = path.join(here, "trades.jsonl");
 
 export function loadBot() {
@@ -37,20 +42,24 @@ export function saveState(obj) {
 export const explorer = (sig) => `https://explorer.solana.com/tx/${sig}?cluster=devnet`;
 
 // ── PDAs ────────────────────────────────────────────────────────────────────
-const pda = (...seeds) => PublicKey.findProgramAddressSync(seeds, PROGRAM_ID)[0];
+const pdaOf = (pid, seeds) => PublicKey.findProgramAddressSync(seeds, pid)[0];
+const pda = (...seeds) => pdaOf(PROGRAM_ID, seeds);
+const poolDa = (...seeds) => pdaOf(POOL_PROGRAM_ID, seeds);
 export const vaultPda = (mint) => pda(Buffer.from("vault"), mint.toBuffer());
 export const vaultTokensPda = (vault) => pda(Buffer.from("vault_tokens"), vault.toBuffer());
-export const poolPda = (id) => pda(Buffer.from("pool"), Buffer.from([id]));
-export const reserveA = (pool) => pda(Buffer.from("res_a"), pool.toBuffer());
-export const reserveB = (pool) => pda(Buffer.from("res_b"), pool.toBuffer());
+export const poolPda = (id) => poolDa(Buffer.from("pool"), Buffer.from([id]));
+export const reserveA = (pool) => poolDa(Buffer.from("res_a"), pool.toBuffer());
+export const reserveB = (pool) => poolDa(Buffer.from("res_b"), pool.toBuffer());
 
 // ── Instruction encoding (Anchor: sha256("global:<name>")[..8] + borsh args) ─
 const disc = (name) => createHash("sha256").update(`global:${name}`).digest().subarray(0, 8);
 const u64 = (n) => { const b = Buffer.alloc(8); b.writeBigUInt64LE(BigInt(n)); return b; };
 const u16 = (n) => { const b = Buffer.alloc(2); b.writeUInt16LE(n); return b; };
 const m = (pubkey, isSigner, isWritable) => ({ pubkey, isSigner, isWritable });
-const ix = (name, keys, ...args) =>
-  new TransactionInstruction({ programId: PROGRAM_ID, keys, data: Buffer.concat([disc(name), ...args]) });
+const ixFor = (programId) => (name, keys, ...args) =>
+  new TransactionInstruction({ programId, keys, data: Buffer.concat([disc(name), ...args]) });
+const ix = ixFor(PROGRAM_ID);
+const poolIx = ixFor(POOL_PROGRAM_ID);
 
 export function initVaultIx(payer, mint, feeBps) {
   const vault = vaultPda(mint);
@@ -71,7 +80,7 @@ export function depositIx(depositor, depositorToken, mint, amount) {
 
 export function initPoolIx(payer, mintA, mintB, id, feeBps) {
   const pool = poolPda(id);
-  return ix("init_pool", [
+  return poolIx("init_pool", [
     m(payer, true, true), m(mintA, false, false), m(mintB, false, false), m(pool, false, true),
     m(reserveA(pool), false, true), m(reserveB(pool), false, true),
     m(TOKEN_PROGRAM_ID, false, false), m(SystemProgram.programId, false, false),
@@ -80,7 +89,7 @@ export function initPoolIx(payer, mintA, mintB, id, feeBps) {
 
 export function addLiquidityIx(provider, provA, provB, id, amountA, amountB) {
   const pool = poolPda(id);
-  return ix("add_liquidity", [
+  return poolIx("add_liquidity", [
     m(provider, true, false), m(provA, false, true), m(provB, false, true), m(pool, false, false),
     m(reserveA(pool), false, true), m(reserveB(pool), false, true), m(TOKEN_PROGRAM_ID, false, false),
   ], u64(amountA), u64(amountB));
@@ -88,7 +97,7 @@ export function addLiquidityIx(provider, provA, provB, id, amountA, amountB) {
 
 export function swapIx(user, userA, userB, id, aToB, amountIn, minOut) {
   const pool = poolPda(id);
-  return ix("swap", [
+  return poolIx("swap", [
     m(user, true, false), m(userA, false, true), m(userB, false, true), m(pool, false, false),
     m(reserveA(pool), false, true), m(reserveB(pool), false, true), m(TOKEN_PROGRAM_ID, false, false),
   ], Buffer.from([aToB ? 1 : 0]), u64(amountIn), u64(minOut));
