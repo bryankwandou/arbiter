@@ -13,7 +13,7 @@ name: Solana devnet bot
 
 on:
   schedule:
-    - cron: "30 */2 * * *"
+    - cron: "15 * * * *"   # hourly; with the concurrency queue a new ~5.5 h run starts as soon as the last ends
   workflow_dispatch:
 
 concurrency:
@@ -26,7 +26,7 @@ permissions:
 jobs:
   trade:
     runs-on: ubuntu-latest
-    timeout-minutes: 35
+    timeout-minutes: 350
     defaults:
       run:
         working-directory: solana-devnet/bot
@@ -55,7 +55,7 @@ jobs:
           BOT_KEYPAIR: ${{ runner.temp }}/bot.json
           ATLAS_GATE: ${{ vars.ATLAS_GATE || '0' }}
           GITHUB_TOKEN: ${{ github.token }}   # reads control.json (kill switch / limits) each cycle
-        run: node bot.js --loop 30 --noise --cycles 45 | tee run.log
+        run: node bot.js --loop 30 --noise --cycles 560 | tee run.log
 
       - name: Publish run ledger
         if: always()
