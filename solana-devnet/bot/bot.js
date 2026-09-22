@@ -122,11 +122,22 @@ function bestTrade(cheap, dear, cap) {
 async function pushNoise() {
   // Stand-in for other market participants: sell some tSOL into pool 1 or buy
   // from pool 0 so a gap reopens. Clearly a simulation, logged as such.
+  // Selling tSOL every time drained the wallet (runs failed with "insufficient
+  // funds" from 2026-09-17 on), so once tSOL runs short, buy it back from pool 1
+  // with tUSD instead — that also widens the gap, and refills the tSOL side.
   const amt = BigInt(20 + Math.floor(Math.random() * 60)) * 1_000_000n; // 20–80 tSOL
+  if ((await tokenBalance(st.botB)) >= amt) {
+    const sig = await sendAndConfirmTransaction(connection,
+      new Transaction().add(swapIx(bot.publicKey, st.botA, st.botB, 0, false, amt, 1n)), [bot]);
+    console.log(`  [simulated market flow] sold ${fmt(amt)} tSOL into pool 0 → ${explorer(sig)}`);
+    return log({ kind: "noise", pool: 0, sold_tsol: fmt(amt), sig });
+  }
+  const usd = amt * 16n;
+  if ((await tokenBalance(st.botA)) < usd) throw new Error("wallet short of both tSOL and tUSD for simulated flow");
   const sig = await sendAndConfirmTransaction(connection,
-    new Transaction().add(swapIx(bot.publicKey, st.botA, st.botB, 0, false, amt, 1n)), [bot]);
-  console.log(`  [simulated market flow] sold ${fmt(amt)} tSOL into pool 0 → ${explorer(sig)}`);
-  log({ kind: "noise", pool: 0, sold_tsol: fmt(amt), sig });
+    new Transaction().add(swapIx(bot.publicKey, st.botA, st.botB, 1, true, usd, 1n)), [bot]);
+  console.log(`  [simulated market flow] bought tSOL with ${fmt(usd)} tUSD from pool 1 → ${explorer(sig)}`);
+  log({ kind: "noise", pool: 1, spent_tusd: fmt(usd), sig });
 }
 
 // Operator controls, set from the ATLAS-QUANT Trade Bot panel. The panel
