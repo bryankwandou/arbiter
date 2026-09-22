@@ -36,7 +36,7 @@ jobs:
       SOLANA_RPC_URL: https://api.mainnet-beta.solana.com
       ARBITER_PROGRAM_ID: 28fGF7iEvig3RRafbwbEMotT17Pb3BX9CqoxB6sSeNsM
       PROFIT_SINK: ETcQvsQek2w9feLfsqoe4AypCWfnrSwQiv3djqocaP2m
-      BOT_KEYPAIR: ${{ runner.temp }}/hot.json
+      BOT_KEYPAIR: /tmp/arbiter-hot.json
     steps:
       - uses: actions/checkout@v4
         with:
