@@ -58,7 +58,7 @@ jobs:
           cache-dependency-path: dashboard-web/package-lock.json
 
       - name: Install npm packages
-        run: npm ci
+        run: npm install --no-audit --no-fund  # lockfile is generated on Windows; npm ci rejects Linux-only optional wasm deps
 
       - name: Type check
         run: npm run type-check
