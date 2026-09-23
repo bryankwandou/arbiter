@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from core.data.clob_client import is_political, parse_market, parse_orderbook
 from core.data.models import BookLevel, MarketSnapshot, OrderBook
@@ -66,7 +66,7 @@ def test_snapshot_store_roundtrip(tmp_path):
     snap = MarketSnapshot(
         market_id="0x123",
         question="Will Candidate A win?",
-        ts=datetime(2026, 6, 4, 12, 0, tzinfo=timezone.utc),
+        ts=datetime(2026, 6, 4, 12, 0, tzinfo=UTC),
         books={
             "111": OrderBook(token_id="111", bids=[BookLevel(price=0.61, size=100)],
                              asks=[BookLevel(price=0.63, size=80)]),

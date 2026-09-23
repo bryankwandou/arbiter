@@ -6,7 +6,7 @@ Manifold = CFMM (bukan CLOB), jadi `probability` langsung = harga YES implisit.
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import httpx
 import structlog
@@ -51,7 +51,7 @@ class ManifoldVenue(Venue):
                 continue
             close_ms = m.get("closeTime")
             end = (
-                datetime.fromtimestamp(close_ms / 1000, tz=timezone.utc)
+                datetime.fromtimestamp(close_ms / 1000, tz=UTC)
                 if isinstance(close_ms, (int, float)) else None
             )
             quotes.append(VenueQuote(

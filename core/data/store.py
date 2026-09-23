@@ -10,7 +10,7 @@ Parquet bisa ditambahkan nanti kalau volume sudah besar.
 from __future__ import annotations
 
 from collections.abc import Iterator
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 from core.data.models import MarketSnapshot
@@ -54,4 +54,4 @@ class SnapshotStore:
 
 
 def utcnow() -> datetime:
-    return datetime.now(timezone.utc)
+    return datetime.now(UTC)

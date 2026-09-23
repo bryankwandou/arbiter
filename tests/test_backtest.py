@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 from backtest.engine import run_backtest
 from backtest.metrics import compute_metrics, max_drawdown, sharpe
@@ -53,7 +53,7 @@ def _arb_snapshot(ts, yes_ask, no_ask, size=1000.0, mid="m1"):
 
 
 def test_backtest_executes_arbitrage_and_profits():
-    base = datetime(2026, 6, 1, tzinfo=timezone.utc)
+    base = datetime(2026, 6, 1, tzinfo=UTC)
     snaps = [_arb_snapshot(base + timedelta(hours=i), 0.45, 0.50, mid=f"m{i}") for i in range(15)]
     rep = run_backtest(snaps, risk_cfg=RISK_CFG, starting_bankroll=1000,
                        min_edge_pct=0.01, min_notional_usd=1.0, cost_per_tx=0.0)
@@ -62,7 +62,7 @@ def test_backtest_executes_arbitrage_and_profits():
 
 
 def test_backtest_ignores_efficient_markets():
-    base = datetime(2026, 6, 1, tzinfo=timezone.utc)
+    base = datetime(2026, 6, 1, tzinfo=UTC)
     snaps = [_arb_snapshot(base + timedelta(hours=i), 0.55, 0.50) for i in range(10)]  # sum 1.05
     rep = run_backtest(snaps, risk_cfg=RISK_CFG, starting_bankroll=1000,
                        min_edge_pct=0.01, min_notional_usd=1.0)
@@ -70,7 +70,7 @@ def test_backtest_ignores_efficient_markets():
 
 
 def test_walkforward_split_is_time_ordered():
-    base = datetime(2026, 6, 1, tzinfo=timezone.utc)
+    base = datetime(2026, 6, 1, tzinfo=UTC)
     snaps = [_arb_snapshot(base + timedelta(hours=i), 0.45, 0.50) for i in range(10)]
     train, test = split_by_time(snaps, train_pct=0.6)
     assert len(train) == 6 and len(test) == 4

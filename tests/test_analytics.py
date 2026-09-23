@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 from core.analytics.analytics import (
     calibration_curve,
@@ -16,7 +16,7 @@ from paper.journal import JournalEntry, TradeJournal
 
 
 def _entries():
-    base = datetime(2026, 6, 1, tzinfo=timezone.utc)
+    base = datetime(2026, 6, 1, tzinfo=UTC)
     return [
         JournalEntry(ts=base, market_id="a", desc="x", filled_sets=1, locked_profit=5.0,
                      fully_filled=True, strategy="arbitrage", venue="polymarket"),

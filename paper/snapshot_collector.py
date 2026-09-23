@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import argparse
 import time
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 import structlog
@@ -52,7 +52,7 @@ def main() -> None:
     log.info("snapshot_collector_start", interval=args.interval)
 
     while True:
-        ts = datetime.now(timezone.utc).isoformat()
+        ts = datetime.now(UTC).isoformat()
         n = collect_once(store, args.limit)
         log.info("collected", ts=ts, n=n)
         if args.once:

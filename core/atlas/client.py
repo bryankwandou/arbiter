@@ -15,7 +15,6 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass
-from typing import Optional
 
 import httpx
 
@@ -41,10 +40,10 @@ class AtlasSignal:
     confidence: float    # 0..1
     price: float
     timeframe: str
-    plan: Optional[dict]
+    plan: dict | None
 
     @property
-    def token(self) -> Optional[str]:
+    def token(self) -> str | None:
         return SYMBOL_TO_TOKEN.get(self.symbol)
 
     @property
@@ -53,7 +52,7 @@ class AtlasSignal:
         return self.action == "BUY" and self.bull_prob >= 58
 
     @classmethod
-    def parse(cls, raw: dict) -> Optional["AtlasSignal"]:
+    def parse(cls, raw: dict) -> AtlasSignal | None:
         if raw.get("error"):
             return None
         return cls(

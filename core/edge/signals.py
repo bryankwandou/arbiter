@@ -7,7 +7,7 @@ secara menguntungkan (likuiditas tipis, edge terlalu kecil, market mau resolve).
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 from pydantic import BaseModel
 
@@ -19,11 +19,11 @@ class ValidationResult(BaseModel):
     reasons: list[str] = []  # alasan GAGAL (kosong kalau lolos) -> audit trail
 
     @classmethod
-    def ok(cls) -> "ValidationResult":
+    def ok(cls) -> ValidationResult:
         return cls(passed=True)
 
     @classmethod
-    def fail(cls, *reasons: str) -> "ValidationResult":
+    def fail(cls, *reasons: str) -> ValidationResult:
         return cls(passed=False, reasons=list(reasons))
 
 
@@ -50,7 +50,7 @@ def validate_opportunity(
 
     # 3. Resolution buffer: jangan masuk kalau market hampir resolve.
     if end_date is not None:
-        now = now or datetime.now(timezone.utc)
+        now = now or datetime.now(UTC)
         if end_date <= now + timedelta(minutes=resolution_buffer_minutes):
             reasons.append("terlalu dekat waktu resolve")
 

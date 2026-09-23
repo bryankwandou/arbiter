@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 from core.data.models import BookLevel, OrderBook
 from core.edge.arbitrage import (
@@ -98,7 +98,7 @@ def test_validation_rejects_thin_liquidity():
 
 def test_validation_rejects_near_resolution():
     opp = detect_binary_dutch_book(book(0.45, 500), book(0.50, 500))
-    soon = datetime.now(timezone.utc) + timedelta(minutes=5)
+    soon = datetime.now(UTC) + timedelta(minutes=5)
     res = validate_opportunity(opp, min_notional_usd=1, end_date=soon, resolution_buffer_minutes=30)
     assert not res.passed
     assert any("resolve" in r for r in res.reasons)

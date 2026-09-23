@@ -6,7 +6,7 @@ evaluasi: bandingkan PnL paper vs ekspektasi backtest. Append-only.
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 from pydantic import BaseModel, Field
@@ -17,7 +17,7 @@ JOURNAL_PATH = Path(__file__).resolve().parent.parent / "storage" / "paper_journ
 
 
 class JournalEntry(BaseModel):
-    ts: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    ts: datetime = Field(default_factory=lambda: datetime.now(UTC))
     market_id: str
     desc: str
     filled_sets: float

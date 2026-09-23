@@ -9,8 +9,7 @@ Given buy and sell quotes, calculates whether an arb is profitable after:
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass, field
-from typing import Optional
+from dataclasses import dataclass
 
 from web3 import Web3
 
@@ -77,7 +76,7 @@ def check_arb(
     gas_price_wei: int,
     token_in_decimals: int = 6,
     token_in_usd_price: float = 1.0,  # USDC ≈ $1
-) -> Optional[ArbOpportunity]:
+) -> ArbOpportunity | None:
     """
     Check if a round-trip arb is profitable.
 
@@ -100,8 +99,9 @@ def check_arb(
     gross_profit = sell_out - total_owed
 
     # Gas cost estimate
-    total_gas = GAS_PER_SWAP * 2 + FLASH_LOAN_OVERHEAD
-    gas_cost_wei = total_gas * gas_price_wei
+    # The fixed-buffer approximation below supersedes a gas_price_wei calculation;
+    # keep the gas total around for when a real ETH/USD feed lands.
+    total_gas = GAS_PER_SWAP * 2 + FLASH_LOAN_OVERHEAD  # noqa: F841
     # Convert ETH gas cost to token_in units (approximate: ETH price * gas in ETH / token price)
     # For simplicity, estimate 0.0001 ETH per successful arb on Base ≈ $0.20 at $2000 ETH
     # We subtract a fixed buffer. Production: fetch real ETH/USD price.

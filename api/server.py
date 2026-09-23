@@ -20,11 +20,12 @@ Jalankan di Railway:
 
 from __future__ import annotations
 
+import contextlib
 import json
 import os
 import uuid
 from contextlib import asynccontextmanager
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 import structlog
@@ -36,7 +37,7 @@ from pydantic import BaseModel
 log = structlog.get_logger()
 
 ROOT = Path(__file__).resolve().parent.parent
-_START_TS = datetime.now(timezone.utc)  # track uptime
+_START_TS = datetime.now(UTC)  # track uptime
 
 # STORAGE_PATH: override ke Railway persistent volume (/data) via env var
 STORAGE = Path(os.getenv("STORAGE_PATH", str(ROOT / "storage")))
@@ -64,7 +65,7 @@ def save_state(state: dict) -> None:
 
 
 def utcnow() -> str:
-    return datetime.now(timezone.utc).isoformat()
+    return datetime.now(UTC).isoformat()
 
 
 def read_journal() -> list[dict]:
@@ -73,10 +74,8 @@ def read_journal() -> list[dict]:
         return entries
     for line in JOURNAL_FILE.read_text(encoding="utf-8").splitlines():
         if line.strip():
-            try:
+            with contextlib.suppress(Exception):
                 entries.append(json.loads(line))
-            except Exception:
-                pass
     return entries
 
 
@@ -227,7 +226,7 @@ def dashboard():
     """Single endpoint for all dashboard data — called by Vercel."""
     state = load_state()
     entries = read_journal()
-    today = datetime.now(timezone.utc).date().isoformat()
+    today = datetime.now(UTC).date().isoformat()
 
     total_pnl = sum(e.get("locked_profit", 0) for e in entries)
     today_entries = [e for e in entries if e.get("ts", "").startswith(today)]
@@ -240,7 +239,7 @@ def dashboard():
     opps = state.get("opportunities", [])
     avg_edge = round(sum(o.get("edge_pct", 0) for o in opps) / len(opps), 4) if opps else 0
 
-    uptime = (datetime.now(timezone.utc) - _START_TS).total_seconds() / 3600
+    uptime = (datetime.now(UTC) - _START_TS).total_seconds() / 3600
 
     # Equity curve — rebuild from journal
     equity = bankroll - total_pnl

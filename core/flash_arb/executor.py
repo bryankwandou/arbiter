@@ -11,14 +11,13 @@ from __future__ import annotations
 import logging
 import os
 import time
-from typing import Optional
 
 from eth_abi import encode as abi_encode
 from web3 import AsyncWeb3
 from web3.providers import AsyncHTTPProvider
 
 from core.flash_arb import config
-from core.flash_arb.abis import FLASH_ARB_ABI, SWAP_ROUTER_ABI, AERODROME_ROUTER_ABI
+from core.flash_arb.abis import FLASH_ARB_ABI
 from core.flash_arb.calculator import ArbOpportunity
 
 log = logging.getLogger(__name__)
@@ -31,7 +30,7 @@ def encode_v3_path(tokens: list[str], fees: list[int]) -> bytes:
     """Pack Uniswap V3 multi-hop path: addr(20) | fee(3) | addr(20) | ..."""
     assert len(tokens) == len(fees) + 1
     result = bytes.fromhex(tokens[0][2:])
-    for fee, tok in zip(fees, tokens[1:]):
+    for fee, tok in zip(fees, tokens[1:], strict=True):
         result += fee.to_bytes(3, "big")
         result += bytes.fromhex(tok[2:])
     return result
@@ -176,7 +175,7 @@ class FlashArbExecutor:
             return config.AERODROME_ROUTER
         raise ValueError(f"Unknown DEX: {dex}")
 
-    async def execute(self, opp: ArbOpportunity) -> Optional[str]:
+    async def execute(self, opp: ArbOpportunity) -> str | None:
         """
         Send the flash arb transaction. Returns tx hash or None on dry run / error.
 

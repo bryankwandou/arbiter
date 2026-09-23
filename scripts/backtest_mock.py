@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import json
 import random
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 ROOT = Path(__file__).parent.parent
@@ -47,7 +47,7 @@ def main() -> None:
         "monte_carlo_ruin_prob": 0.032,
         "equity_curve": equity_curve,
         "pnl_distribution": [],
-        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "generated_at": datetime.now(UTC).isoformat(),
         "note": "MOCK DATA — generated from backtest_mock.py for dashboard demo",
     }
 

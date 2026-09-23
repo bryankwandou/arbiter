@@ -12,11 +12,9 @@ import asyncio
 import json
 import logging
 import os
-import time
-from dataclasses import asdict, dataclass
-from datetime import datetime, timezone
+from dataclasses import dataclass
+from datetime import UTC, datetime
 from pathlib import Path
-from typing import Optional
 
 from core.flash_arb import config
 from core.flash_arb.calculator import ArbOpportunity, check_arb, estimate_gas_cost_wei
@@ -32,7 +30,7 @@ STATE_PATH = Path(__file__).resolve().parents[2] / "storage" / "flash_arb_state.
 ATLAS_GATE = os.getenv("ATLAS_GATE", "0") == "1"
 
 
-async def _atlas_regime() -> Optional[dict]:
+async def _atlas_regime() -> dict | None:
     """Fetch the ATLAS-QUANT regime. Returns None when the bridge is unreachable."""
     try:
         from core.atlas.client import fetch_signals
@@ -62,7 +60,7 @@ class ScanResult:
     best_edge_pct: float
     total_profit_usd: float
     errors: int
-    atlas: Optional[dict] = None
+    atlas: dict | None = None
 
 
 class FlashArbMonitor:
@@ -117,7 +115,7 @@ class FlashArbMonitor:
             return []
 
     async def scan_once(self) -> ScanResult:
-        ts         = datetime.now(timezone.utc).isoformat()
+        ts         = datetime.now(UTC).isoformat()
         errors     = 0
         all_opps:  list[ArbOpportunity] = []
         executions: list[dict]           = []

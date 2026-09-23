@@ -10,13 +10,12 @@ from __future__ import annotations
 import asyncio
 import logging
 from dataclasses import dataclass
-from typing import Optional
 
-from web3 import AsyncWeb3, WebSocketProvider
+from web3 import AsyncWeb3
 from web3.providers import AsyncHTTPProvider
 
 from core.flash_arb import config
-from core.flash_arb.abis import QUOTER_V2_ABI, AERODROME_ROUTER_ABI
+from core.flash_arb.abis import AERODROME_ROUTER_ABI, QUOTER_V2_ABI
 
 log = logging.getLogger(__name__)
 
@@ -60,7 +59,7 @@ class PriceFeed:
 
     async def quote_uni_v3(
         self, token_in: str, token_out: str, amount_in: int, fee: int
-    ) -> Optional[Quote]:
+    ) -> Quote | None:
         """Quote a single Uniswap V3 pool at `fee` tier."""
         try:
             result = await self._quoter.functions.quoteExactInputSingle({
@@ -98,7 +97,7 @@ class PriceFeed:
 
     async def quote_aerodrome(
         self, token_in: str, token_out: str, amount_in: int, stable: bool = False
-    ) -> Optional[Quote]:
+    ) -> Quote | None:
         """Quote an Aerodrome pool (volatile or stable), or None if unavailable."""
         if self._aero is None:
             return None

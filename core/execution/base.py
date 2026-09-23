@@ -8,7 +8,7 @@ hasil backtest, paper, dan live (penyebab umum bot gagal di dunia nyata).
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from enum import Enum
 
 from pydantic import BaseModel, Field
@@ -33,7 +33,7 @@ class Fill(BaseModel):
     token_id: str
     price: float
     size: float           # size yang benar-benar terisi (bisa < order.size)
-    ts: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    ts: datetime = Field(default_factory=lambda: datetime.now(UTC))
 
     @property
     def notional(self) -> float:

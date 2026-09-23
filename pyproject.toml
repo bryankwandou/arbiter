@@ -10,6 +10,10 @@ target-version = "py311"
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "B", "UP", "SIM"]
+# UP042 wants the (str, Enum) classes rewritten as StrEnum. That changes what
+# str() returns for every mode/side value the live bot logs and serialises, so
+# the cosmetic win is not worth touching execution code for.
+ignore = ["UP042", "E501"]  # E501: line length is cosmetic; rewrapping live trading code is not worth the risk
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"

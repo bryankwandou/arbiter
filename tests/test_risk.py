@@ -4,8 +4,8 @@ from __future__ import annotations
 
 from core.data.models import BookLevel, OrderBook
 from core.edge.arbitrage import detect_binary_dutch_book, detect_mutually_exclusive
-from core.risk.killswitch import KillSwitch
 from core.risk.kelly import fractional_kelly, kelly_fraction
+from core.risk.killswitch import KillSwitch
 from core.risk.limits import RiskManager
 
 RISK_CFG = {
@@ -52,7 +52,8 @@ def test_killswitch_trips_on_daily_loss():
 
 def test_killswitch_trips_on_consecutive_errors():
     ks = KillSwitch(daily_loss_limit_pct=0.10, max_consecutive_errors=3)
-    ks.record_error(); ks.record_error()
+    ks.record_error()
+    ks.record_error()
     assert not ks.tripped
     ks.record_error()
     assert ks.tripped
@@ -62,9 +63,11 @@ def test_killswitch_trips_on_consecutive_errors():
 
 def test_killswitch_success_resets_error_count():
     ks = KillSwitch(daily_loss_limit_pct=0.10, max_consecutive_errors=3)
-    ks.record_error(); ks.record_error()
+    ks.record_error()
+    ks.record_error()
     ks.record_success()
-    ks.record_error(); ks.record_error()
+    ks.record_error()
+    ks.record_error()
     assert not ks.tripped  # tidak pernah 3 beruntun
 
 

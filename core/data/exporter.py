@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 ROOT = Path(__file__).parent.parent.parent
@@ -20,7 +20,7 @@ def append_trade(trade_dict: dict) -> None:
         except Exception:
             trades = []
     trade_dict.setdefault("id", f"t_{len(trades)+1:06d}")
-    trade_dict.setdefault("timestamp", datetime.now(timezone.utc).isoformat())
+    trade_dict.setdefault("timestamp", datetime.now(UTC).isoformat())
     trades.append(trade_dict)
     JOURNAL_PATH.write_text(json.dumps(trades, indent=2))
 

@@ -7,9 +7,10 @@ Untuk live update lokal: API routes baca dari storage/ langsung.
 from __future__ import annotations
 
 import argparse
+import contextlib
 import json
 import os
-from datetime import datetime, timezone, date
+from datetime import UTC, date, datetime
 from pathlib import Path
 
 ROOT = Path(__file__).parent.parent
@@ -18,7 +19,7 @@ PUBLIC_DATA = ROOT / "dashboard-web" / "public" / "data"
 
 
 def utcnow() -> str:
-    return datetime.now(timezone.utc).isoformat()
+    return datetime.now(UTC).isoformat()
 
 
 def ensure_dirs() -> None:
@@ -94,10 +95,8 @@ def export_all(dry_run: bool = False) -> None:
     opps_file = STORAGE / "reports" / "opportunities.json"
     opps: list[dict] = []
     if opps_file.exists():
-        try:
+        with contextlib.suppress(Exception):
             opps = json.loads(opps_file.read_text())
-        except Exception:
-            pass
 
     if dry_run:
         print(f"[export] dry-run OK | trades={len(trades)} equity_pts={len(equity)} opps={len(opps)}")
