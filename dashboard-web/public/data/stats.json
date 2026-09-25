@@ -1,7 +1,7 @@
 {
   "mode": "paper",
-  "uptime_hours": 2313.63,
-  "last_scan_at": "2026-09-25T19:59:24.719Z",
+  "uptime_hours": 2316.9,
+  "last_scan_at": "2026-09-25T23:15:40.461Z",
   "opportunities_found_today": 0,
   "trades_today": 0,
   "realized_pnl_today": 0,
@@ -13,7 +13,7 @@
   "bankroll_usd": 1000,
   "open_positions": 0,
   "max_open_positions": 5,
-  "scan_count": 1268,
+  "scan_count": 1269,
   "started_at": "2026-06-21T10:21:23.938Z",
   "consecutive_api_failures": 0
 }
