@@ -1,12 +1,24 @@
-# Dry-run edge watch: measures CEX-DEX, LST triangle and stablecoin-peg edges
-# around the clock with public quotes only. No keys, no orders, no transactions.
-# Each ~5.5 h run publishes a table in its summary and the raw samples as an artifact.
+# Dry-run edge watch: every strategy class we can observe with public data
+# (dex, tri, lst, peg, cex, stock, stat) runs in parallel, one runner each, at
+# $100 / $1k / $10k. No keys, no orders, no transactions.
+#
+# Runs chain: the report job dispatches the next run the moment this one ends,
+# so coverage does not depend on GitHub's cron (which drops scheduled runs).
+# The hourly cron only restarts the chain if it ever breaks.
+# Stop everything: gh workflow disable edge-watch.yml -R bryankwandou/arbiter
 name: Edge watch (dry run)
 
 on:
   schedule:
     - cron: "5 * * * *"
   workflow_dispatch:
+    inputs:
+      minutes:
+        description: Minutes per strategy job
+        default: "320"
+      chain:
+        description: Dispatch the next run when this one ends
+        default: "true"
 
 concurrency:
   group: edge-watch
@@ -19,10 +31,17 @@ jobs:
   watch:
     if: github.repository == 'bryankwandou/arbiter'
     runs-on: ubuntu-latest
-    timeout-minutes: 350
+    timeout-minutes: 340
+    strategy:
+      fail-fast: false
+      matrix:
+        strategy: [dex, tri, lst, peg, cex, stock, stat]
     defaults:
       run:
         working-directory: solana-devnet/bot
+    env:
+      STRATEGY: ${{ matrix.strategy }}
+      LOG: ./edge-${{ matrix.strategy }}.jsonl
     steps:
       - uses: actions/checkout@v4
         with:
@@ -30,14 +49,41 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 20
-      - name: Watch (~5.5 h)
-        run: timeout 19500 node edge-watch.js || test $? -eq 124
+      - name: Watch
+        run: timeout $(( ${{ inputs.minutes || '320' }} * 60 )) node edge-watch.js || test $? -eq 124
       - name: Summary
         if: always()
         run: node edge-watch.js --summary | tee -a "$GITHUB_STEP_SUMMARY"
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: edge-watch-${{ github.run_id }}
-          path: solana-devnet/bot/edge-watch.jsonl
+          name: edge-${{ matrix.strategy }}-${{ github.run_id }}
+          path: solana-devnet/bot/edge-${{ matrix.strategy }}.jsonl
           retention-days: 30
+
+  report:
+    needs: watch
+    if: always() && github.repository == 'bryankwandou/arbiter'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      actions: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: edge-*-${{ github.run_id }}
+          merge-multiple: true
+          path: data
+      - name: Combined summary
+        run: node solana-devnet/bot/edge-watch.js --summary data/*.jsonl | tee -a "$GITHUB_STEP_SUMMARY"
+      - name: Chain next run
+        if: inputs.chain != 'false'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh workflow run edge-watch.yml -R "$GITHUB_REPOSITORY" --ref "$GITHUB_REF_NAME"
