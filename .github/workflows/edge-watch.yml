@@ -1,0 +1,43 @@
+# Dry-run edge watch: measures CEX-DEX, LST triangle and stablecoin-peg edges
+# around the clock with public quotes only. No keys, no orders, no transactions.
+# Each ~5.5 h run publishes a table in its summary and the raw samples as an artifact.
+name: Edge watch (dry run)
+
+on:
+  schedule:
+    - cron: "5 * * * *"
+  workflow_dispatch:
+
+concurrency:
+  group: edge-watch
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  watch:
+    if: github.repository == 'bryankwandou/arbiter'
+    runs-on: ubuntu-latest
+    timeout-minutes: 350
+    defaults:
+      run:
+        working-directory: solana-devnet/bot
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Watch (~5.5 h)
+        run: timeout 19500 node edge-watch.js || test $? -eq 124
+      - name: Summary
+        if: always()
+        run: node edge-watch.js --summary | tee -a "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: edge-watch-${{ github.run_id }}
+          path: solana-devnet/bot/edge-watch.jsonl
+          retention-days: 30
