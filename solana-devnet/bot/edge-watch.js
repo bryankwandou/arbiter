@@ -153,14 +153,29 @@ async function underlying(sym) { // last 1-minute print incl. pre/post market, a
   for (let i = ts.length - 1; i >= 0; i--) if (c[i] != null) return { px: c[i], age: Date.now() / 1000 - ts[i] };
   return { px: r.meta.regularMarketPrice, age: Date.now() / 1000 - r.meta.regularMarketTime };
 }
+// xStocks are Token-2022 mints with a scaled-UI-amount multiplier that grows as
+// dividends are paid: one raw token is `multiplier` shares. Without it SPYx
+// shows a fake ~57 bps premium. Refreshed every 10 minutes.
+const RPC = process.env.SOLANA_RPC_URL || "https://api.mainnet-beta.solana.com";
+const mult = {};
+async function multiplier(x) {
+  if (mult[x] && Date.now() - mult[x].at < 600000) return mult[x].v;
+  const r = await fetch(RPC, { method: "POST", headers: { "content-type": "application/json" },
+    body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "getAccountInfo", params: [T[x][0], { encoding: "jsonParsed" }] }) });
+  const s = (await r.json()).result.value.data.parsed.info.extensions?.find((e) => e.extension === "scaledUiAmountConfig")?.state;
+  const v = !s ? 1 : Number(Date.now() / 1000 >= s.newMultiplierEffectiveTimestamp ? s.newMultiplier : s.multiplier);
+  mult[x] = { v, at: Date.now() };
+  return v;
+}
 async function stock(usd) {
   for (const [x, sym] of Object.entries(STOCKS)) {
     try {
+      const m = await multiplier(x);
       await budget(2);
       const shares = await quote("USDC", x, raw("USDC", usd));
       const sellUsd = units("USDC", await quote(x, "USDC", shares));
       const u = await underlying(sym);
-      const n = units(x, shares), live = u.age < 180 ? "live" : "closed";
+      const n = units(x, shares) * m, live = u.age < 180 ? "live" : "closed";
       // closed = no hedge venue open: the position carries gap risk until the next open
       log("stock", `${x} sell chain, buy ${sym} (${live})`, usd, (sellUsd / n / u.px - 1) * 1e4, HEDGE_BPS + atomic(usd));
       log("stock", `${x} buy chain, sell ${sym} (${live})`, usd, (u.px / (usd / n) - 1) * 1e4, HEDGE_BPS + atomic(usd));
