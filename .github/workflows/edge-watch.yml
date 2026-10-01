@@ -1,6 +1,9 @@
-# Dry-run edge watch: every strategy class we can observe with public data
-# (dex, tri, lst, peg, cex, stock, stat) runs in parallel, one runner each, at
-# $100 / $1k / $10k. No keys, no orders, no transactions.
+# Dry-run edge watch: every strategy class we can observe with public data runs
+# in parallel, one runner each, at $5 / $10 / $100 / $1k / $10k:
+#   rounds    dex, tri, lst, peg, cex, stock, stat, wide (4 shards, ~100 tokens)
+#   watchers  fast (WebSocket cex-dex), launch, liq, carry
+# Positive cycles are also simulated on mainnet (sigVerify off). No keys, no
+# orders, no signed transactions.
 #
 # Runs chain: the report job dispatches the next run the moment this one ends,
 # so coverage does not depend on GitHub's cron (which drops scheduled runs).
@@ -35,12 +38,13 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        strategy: [dex, tri, lst, peg, cex, stock, stat]
+        strategy: [dex, tri, lst, peg, cex, stock, stat, wide-0, wide-1, wide-2, wide-3, fast, launch, liq, carry]
     defaults:
       run:
         working-directory: solana-devnet/bot
     env:
-      STRATEGY: ${{ matrix.strategy }}
+      JOB: ${{ matrix.strategy }}
+      NSHARD: "4"
       LOG: ./edge-${{ matrix.strategy }}.jsonl
     steps:
       - uses: actions/checkout@v4
@@ -48,9 +52,13 @@ jobs:
           persist-credentials: false
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22
+      - run: npm ci --ignore-scripts
       - name: Watch
-        run: timeout $(( ${{ inputs.minutes || '320' }} * 60 )) node edge-watch.js || test $? -eq 124
+        run: |
+          export STRATEGY="${JOB%%-*}"
+          case "$JOB" in *-*) export SHARD="${JOB##*-}";; esac
+          timeout $(( ${{ inputs.minutes || '320' }} * 60 )) node edge-watch.js || test $? -eq 124
       - name: Summary
         if: always()
         run: node edge-watch.js --summary | tee -a "$GITHUB_STEP_SUMMARY"
@@ -74,7 +82,7 @@ jobs:
           persist-credentials: false
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22
       - uses: actions/download-artifact@v4
         with:
           pattern: edge-*-${{ github.run_id }}
