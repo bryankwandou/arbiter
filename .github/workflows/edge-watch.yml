@@ -1,7 +1,7 @@
 # Dry-run edge watch: every strategy class we can observe with public data runs
 # in parallel, one runner each, at $5 / $10 / $100 / $1k / $10k:
 #   rounds    dex, tri, lst, peg, cex, stock, stat, wide (4 shards, ~100 tokens)
-#   watchers  fast (WebSocket cex-dex), launch, liq, carry
+#   watchers  fast (WebSocket cex-dex), titan (slide demo: Backpack vs Titan DART), launch, liq, carry
 # Positive cycles are also simulated on mainnet (sigVerify off). No keys, no
 # orders, no signed transactions.
 #
@@ -38,7 +38,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        strategy: [dex, tri, lst, peg, cex, stock, stat, wide-0, wide-1, wide-2, wide-3, fast, launch, liq, carry]
+        strategy: [dex, tri, lst, peg, cex, stock, stat, wide-0, wide-1, wide-2, wide-3, fast, titan, launch, liq, carry]
     defaults:
       run:
         working-directory: solana-devnet/bot

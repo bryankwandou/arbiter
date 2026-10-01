@@ -13,6 +13,8 @@
 // Watchers (run until killed):
 //   fast   event-driven cex-dex: Backpack + OKX WebSocket tops; the moment a
 //          book moves MOVE_BPS the chain is quoted (plus an idle baseline/min)
+//   titan  the Solana Fall School demo loop: Backpack bookTicker vs Titan
+//          (DART) quotes, both directions, slide's COSTS formula
 //   launch paper-buy tokens right after they graduate from a launchpad and
 //          sell them 30 s … 15 min later, at real quotes
 //   liq    every Kamino / MarginFi liquidation on mainnet: winner, profit,
@@ -376,6 +378,36 @@ async function fast() {
   for (;;) { await sleep(60000); for (const s of FAST_SYMS) await check(s, "idle"); }
 }
 
+// The Solana Fall School demo loop ("Titan × Backpack"), as written on the
+// slide: Backpack bookTicker vs Titan quotes, both directions, at fixed sizes.
+//   edgeA = sellPx / bp.ask - 1 - COSTS   (buy on Backpack, sell on chain)
+//   edgeB = bp.bid / buyPx - 1 - COSTS    (buy on chain, sell on Backpack)
+//   COSTS = Backpack taker + (priority fee + tip) / notional + safety buffer
+// Titan's streaming API needs a key from the Titan team; this uses its free
+// public DART endpoint (1 req/s, outAmount already net of pool fees and impact).
+const DART = "https://api.titan.exchange/dart";
+async function titan() {
+  const SAFETY = Number(process.env.SAFETY_BPS || 2), TSIZES = (process.env.TITAN_SIZES || "10,100").split(",").map(Number);
+  const USER = process.env.SIM_WALLET || "5tzFkiKscXHK5ZXCGbXZxdw7gTjjD1mBwuoFbhUvuAi9";
+  const dart = async (a, b, amount) => BigInt((await post(`${DART}/swap`, { inputMint: T[a][0], outputMint: T[b][0], amount: String(amount), userPublicKey: USER, slippageBps: 10 })).outputAmount);
+  const bp = {};
+  socket("wss://ws.backpack.exchange", (ws) => ws.send(JSON.stringify({ method: "SUBSCRIBE", params: ["bookTicker.SOL_USDC"] })),
+    (d) => { const m = JSON.parse(d).data; if (m?.e === "bookTicker") Object.assign(bp, { bid: +m.b, bq: +m.B, ask: +m.a, aq: +m.A, at: Date.now() }); });
+  for (;;) {
+    for (const usd of TSIZES) {
+      try {
+        if (!bp.at || Date.now() - bp.at > 10000) { await sleep(1100); continue; }
+        const sol = usd / ((bp.bid + bp.ask) / 2);
+        const sellPx = units("USDC", await dart("SOL", "USDC", raw("SOL", sol))) / sol; await sleep(1500);
+        const buyPx = usd / units("SOL", await dart("USDC", "SOL", raw("USDC", usd))); await sleep(1500);
+        const cost = VENUES.backpack.fee + atomic(usd) + SAFETY, age = Date.now() - bp.at;
+        if (bp.aq >= sol) log("titan", "SOL A: buy Backpack, sell DART", usd, (sellPx / bp.ask - 1) * 1e4, cost, { bp_age_ms: age });
+        if (bp.bq >= sol) log("titan", "SOL B: buy DART, sell Backpack", usd, (bp.bid / buyPx - 1) * 1e4, cost, { bp_age_ms: age });
+      } catch (e) { console.log(`titan ${usd}: ${e.message}`); await sleep(5000); }
+    }
+  }
+}
+
 // Launchpad graduation: Jupiter's 5-minute trending/traded lists carry
 // graduatedAt; a token first seen within GRAD_MAX_AGE s of graduating is paper-
 // bought at a real quote and sold at real quotes after each hold time.
@@ -484,7 +516,7 @@ async function carry() {
 }
 
 const ROUND = { dex, tri, lst, peg, wide, cex, stock, stat };
-const WATCH = { fast, launch, liq, carry };
+const WATCH = { fast, titan, launch, liq, carry };
 
 function summary(files) {
   const all = files.filter((f) => existsSync(f)).flatMap((f) => readFileSync(f, "utf8").split("\n").filter(Boolean).map((l) => JSON.parse(l)));
