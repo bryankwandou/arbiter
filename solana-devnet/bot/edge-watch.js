@@ -19,6 +19,8 @@
 //          sell them 30 s … 15 min later, at real quotes
 //   liq    every Kamino / MarginFi liquidation on mainnet: winner, profit,
 //          failed competing attempts
+//   liqbot dry-run MarginFi receivership liquidator on every account someone
+//          tried to liquidate: health, repay size, swap quote, net profit
 //   carry  funding-rate carry: long spot, short perp (Backpack, Hyperliquid, OKX)
 //
 // Execution check (SIM=1, default): atomic USDC cycles that quote positive, plus
@@ -495,6 +497,118 @@ async function liq() {
   }
 }
 
+// Dry-run MarginFi receivership liquidator (start_liquidation → withdraw → swap
+// → repay → end_liquidation; needs no capital, only gas). Layouts and rules from
+// 0dotxyz/marginfi-v2 type-crate + RECEIVERSHIP_LIQUIDATION.md:
+//   seized ≤ repaid × (1 + FeeState.liquidation_max_fee), maint health may not drop,
+//   flat fee FeeState.liquidation_flat_sol_fee, a 512-byte liq_record on first use.
+// Targets = accounts named in anyone's liquidation attempt (landed or failed),
+// re-checked every RECHECK_MS as prices move. Health uses Jupiter prices, not the
+// bank oracles, so it is an estimate. Nothing is signed or sent.
+async function liqbot() {
+  const MFI = "MFv2hWf31Z9kbCa1snEPYctwafyhdvnV7FZnsebVacA";
+  const FEE_STATE = "HoMNdUF3RDZDPKAARYK1mxcPFfUnPjLmpKYibZzAijev"; // PDA ["feestate"]
+  const WS = process.env.SOLANA_WS_URL || RPC.replace(/^http/, "ws");
+  const RECHECK_MS = Number(process.env.RECHECK_MS || 300000);
+  const { createHash } = await import("node:crypto");
+  const disc = (n) => createHash("sha256").update(`account:${n}`).digest().subarray(0, 8);
+  const D_ACC = disc("MarginfiAccount");
+  const B58 = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
+  const b58 = (buf) => { let n = BigInt("0x" + buf.toString("hex")), s = ""; while (n > 0n) { s = B58[Number(n % 58n)] + s; n /= 58n; } for (const b of buf) { if (b) break; s = "1" + s; } return s; };
+  const i80 = (buf, o) => Number(buf.readBigInt64LE(o + 8)) * 2 ** 16 + Number(buf.readBigUInt64LE(o)) / 2 ** 48; // WrappedI80F48
+  const acct = async (k) => { const v = (await rpc("getAccountInfo", [k, { encoding: "base64" }])).value; return v && Buffer.from(v.data[0], "base64"); };
+  const sym = (m) => Object.keys(T).find((s) => T[s][0] === m) || m.slice(0, 4);
+
+  const fs = await acct(FEE_STATE);
+  const MAX_FEE = i80(fs, 120), FLAT_SOL = fs.readUInt32LE(208) / 1e9;
+  const RECORD_SOL = ((512 + 8 + 128) * 6960) / 1e9; // rent-exempt liq_record, paid once per account
+  console.log(`liqbot max_fee ${MAX_FEE.toFixed(4)} flat_fee ${FLAT_SOL} SOL`);
+
+  const banks = new Map(); // bank -> { mint, dec, assetShare, liabShare, aw, lw, at }
+  async function bank(k) {
+    const c = banks.get(k);
+    if (c && Date.now() - c.at < 600000) return c;
+    const d = await acct(k);
+    const b = { mint: b58(d.subarray(8, 40)), dec: d[40], assetShare: i80(d, 80), liabShare: i80(d, 96), aw: i80(d, 312), lw: i80(d, 344), at: Date.now() };
+    banks.set(k, b);
+    return b;
+  }
+
+  const targets = new Map(), attempts = [], stat = { attempts: 0, checked: 0, unhealthy: 0, logged: 0 };
+  socket(WS, (ws) => ws.send(JSON.stringify({ jsonrpc: "2.0", id: 1, method: "logsSubscribe", params: [{ mentions: [MFI] }, { commitment: "confirmed" }] })),
+    (d) => {
+      const j = JSON.parse(d);
+      if (j.error) return console.log(`liqbot subscribe failed: ${j.error.message}`);
+      const v = j.params?.result?.value;
+      if (!v || !v.logs.some((l) => /Instruction: (LendingAccountLiquidate|StartLiquidation)/.test(l))) return;
+      stat.attempts++;
+      if (attempts.length < 50) attempts.push(v.signature);
+    });
+  setInterval(() => console.log(`liqbot heartbeat ${JSON.stringify({ ...stat, targets: targets.size })}`), Number(process.env.HB_MS || 600000));
+
+  async function discover(sig) {
+    const tx = await rpc("getTransaction", [sig, { encoding: "json", maxSupportedTransactionVersion: 1, commitment: "confirmed" }]);
+    if (!tx) return;
+    const keys = [...tx.transaction.message.accountKeys, ...(tx.meta.loadedAddresses?.writable || [])];
+    const infos = (await rpc("getMultipleAccounts", [keys, { encoding: "base64", dataSlice: { offset: 0, length: 72 } }])).value;
+    keys.forEach((k, i) => {
+      const v = infos[i];
+      if (v?.owner !== MFI) return;
+      const h = Buffer.from(v.data[0], "base64");
+      if (!h.subarray(0, 8).equals(D_ACC) || b58(h.subarray(40, 72)) === keys[0]) return; // skip the liquidator's own account
+      if (!targets.has(k)) targets.set(k, { by: keys[0], next: 0 });
+    });
+  }
+
+  async function check(k, t) {
+    const a = await acct(k);
+    if (!a) return targets.delete(k);
+    stat.checked++;
+    const pos = [];
+    for (let i = 0; i < 16; i++) {
+      const o = 72 + i * 104;
+      if (!a[o]) continue;
+      const b = await bank(b58(a.subarray(o + 1, o + 33)));
+      pos.push({ ...b, asset: (i80(a, o + 40) * b.assetShare) / 10 ** b.dec, liab: (i80(a, o + 56) * b.liabShare) / 10 ** b.dec });
+    }
+    if (!pos.some((p) => p.liab > 0)) return targets.delete(k); // nothing owed: closed out
+    await budget(1);
+    const px = await get(`https://lite-api.jup.ag/price/v3?ids=${[...new Set([...pos.map((p) => p.mint), T.SOL[0]])].join(",")}`);
+    let health = 0;
+    for (const p of pos) { p.px = px[p.mint]?.usdPrice || 0; health += p.asset * p.px * p.aw - p.liab * p.px * p.lw; }
+    if (health >= 0) return;
+    stat.unhealthy++;
+    // Largest debt against the largest seizable collateral (weight 0 / no price can't be withdrawn).
+    const L = pos.filter((p) => p.liab > 0).sort((x, y) => y.liab * y.px - x.liab * x.px)[0];
+    const A = pos.filter((p) => p.asset > 0 && p.aw > 0 && p.px > 0).sort((x, y) => y.asset * y.px - x.asset * x.px)[0];
+    const fee = A ? Math.min(MAX_FEE, L.lw / A.aw - 1) : 0; // keep maint health from dropping
+    if (!A || !L.px || fee <= 0) return log("liqbot", `${sym(L.mint)} debt, nothing seizable`, 100, 0, 0, { account: k, health: +health.toFixed(4), profit_usd: 0 });
+    const repay = Math.min(L.liab * L.px, (A.asset * A.px) / (1 + fee));
+    const seize = (repay * (1 + fee)) / A.px; // collateral tokens
+    let outUsd = seize * A.px;
+    if (A.mint !== L.mint) {
+      await budget(1);
+      const q = await get(`${JUP}/quote?inputMint=${A.mint}&outputMint=${L.mint}&amount=${Math.floor(seize * 10 ** A.dec)}&slippageBps=50`);
+      outUsd = (Number(q.outAmount) / 10 ** L.dec) * L.px;
+    }
+    const costUsd = TX_USD + (FLAT_SOL + (a.subarray(2224, 2256).some((x) => x) ? 0 : RECORD_SOL)) * (px[T.SOL[0]]?.usdPrice || 0);
+    stat.logged++;
+    log("liqbot", `${sym(A.mint)}->${sym(L.mint)}`, repay < 100 ? 100 : repay < 1000 ? 1000 : repay < 10000 ? 10000 : 100000,
+      ((outUsd - repay) / repay) * 1e4, (costUsd / repay) * 1e4,
+      { account: k, health: +health.toFixed(4), repay_usd: +repay.toFixed(4), profit_usd: +(outUsd - repay - costUsd).toFixed(4), attempted_by: t.by });
+  }
+
+  for (;;) {
+    try {
+      const sig = attempts.shift();
+      if (sig) await discover(sig);
+      const due = [...targets].find(([, t]) => t.next <= Date.now());
+      if (due) { due[1].next = Date.now() + RECHECK_MS; await check(...due); }
+    } catch (e) { console.log(`liqbot: ${e.message}`); }
+    await sleep(2000);
+  }
+}
+
 // Funding carry: hold spot, short the perp, collect funding. Logged as the
 // 30-day carry at the current rate against the one-off cost of opening and
 // closing both legs (perp taker twice + an on-chain spot round trip).
@@ -524,7 +638,7 @@ async function carry() {
 }
 
 const ROUND = { dex, tri, lst, peg, wide, cex, stock, stat };
-const WATCH = { fast, titan, launch, liq, carry };
+const WATCH = { fast, titan, launch, liq, liqbot, carry };
 
 function summary(files) {
   const all = files.filter((f) => existsSync(f)).flatMap((f) => readFileSync(f, "utf8").split("\n").filter(Boolean).map((l) => JSON.parse(l)));
