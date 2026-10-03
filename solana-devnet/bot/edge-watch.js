@@ -452,18 +452,26 @@ async function launch() {
 // fee payer's balance changes (= the liquidator's take). Failed attempts are the
 // competition that lost the race.
 async function liq() {
-  const PROGS = { kamino: "KLend2g3cP87fffoy8q1mQqGKjrxjC8boSyAYavgmjD", marginfi: "MFv2hWf31Z9kbCa1snEPYctwafyvdvnV7FXFSn7MFPHS" };
+  // IDs from Kamino-Finance/klend lib.rs and mrgnlabs/marginfi-v2 Anchor.toml [programs.mainnet].
+  const PROGS = { kamino: "KLend2g3cP87fffoy8q1mQqGKjrxjC8boSyAYavgmjD", marginfi: "MFv2hWf31Z9kbCa1snEPYctwafyhdvnV7FZnsebVacA" };
   const WS = process.env.SOLANA_WS_URL || RPC.replace(/^http/, "ws");
-  const queue = [];
+  const queue = [], seen = {};
   for (const [name, prog] of Object.entries(PROGS)) {
+    seen[name] = { msgs: 0, liqs: 0 };
     socket(WS, (ws) => ws.send(JSON.stringify({ jsonrpc: "2.0", id: 1, method: "logsSubscribe", params: [{ mentions: [prog] }, { commitment: "confirmed" }] })),
       (d) => {
-        const v = JSON.parse(d).params?.result?.value;
-        if (!v || !v.logs.some((l) => /Instruction: (Liquidate|LendingAccountLiquidate)/.test(l))) return;
+        const j = JSON.parse(d);
+        if (j.error) return console.log(`liq ${name} subscribe failed: ${j.error.message}`);
+        const v = j.params?.result?.value;
+        if (v) seen[name].msgs++;
+        if (!v || !v.logs.some((l) => /Instruction: (Liquidate|LendingAccountLiquidate|StartLiquidation)/.test(l))) return;
+        seen[name].liqs++;
         if (v.err) logFail("liq", name, 0, "competing attempt failed");
         else queue.push({ name, sig: v.signature });
       });
   }
+  // Heartbeat: a silent job must read as "stream alive, no liquidations", never as nothing.
+  setInterval(() => console.log(`liq heartbeat ${JSON.stringify(seen)}`), Number(process.env.HB_MS || 600000));
   const bucket = (x) => (x < 100 ? 100 : x < 1000 ? 1000 : x < 10000 ? 10000 : 100000);
   for (;;) {
     const job = queue.shift();
