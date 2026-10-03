@@ -478,7 +478,7 @@ async function liq() {
     if (!job) { await sleep(2000); continue; }
     try {
       await sleep(1500); // let the transaction reach the RPC's confirmed history
-      const tx = await rpc("getTransaction", [job.sig, { encoding: "jsonParsed", maxSupportedTransactionVersion: 0, commitment: "confirmed" }]);
+      const tx = await rpc("getTransaction", [job.sig, { encoding: "jsonParsed", maxSupportedTransactionVersion: 1, commitment: "confirmed" }]);
       if (!tx) { queue.push(job); continue; }
       const payer = tx.transaction.message.accountKeys[0].pubkey;
       const delta = { [T.SOL[0]]: (tx.meta.postBalances[0] - tx.meta.preBalances[0]) / 1e9 };
