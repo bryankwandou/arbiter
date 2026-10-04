@@ -193,7 +193,7 @@ let universe = { at: 0, syms: [] };
 async function wideTokens() {
   if (Date.now() - universe.at < 3600000 && universe.syms.length) return universe.syms;
   const list = new Map();
-  for (const e of ["toptraded/24h", "toporganicscore/24h"]) {
+  for (const e of ["toptraded/24h", "toporganicscore/24h", "toptrending/24h", "toptraded/1h", "toptrending/1h"]) {
     await budget(1);
     for (const t of await get(`https://lite-api.jup.ag/tokens/v2/${e}?limit=100`)) list.set(t.id, t);
   }
