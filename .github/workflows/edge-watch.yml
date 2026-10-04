@@ -38,7 +38,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        strategy: [dex, tri, lst, peg, cex, stock, stat, wide-0, wide-1, wide-2, wide-3, wide-4, wide-5, wide-6, wide-7, wide-8, wide-9, wide-10, wide-11, wide-12, wide-13, wide-14, wide-15, wide-16, wide-17, wide-18, wide-19, wide-20, wide-21, wide-22, wide-23, wide-24, wide-25, wide-26, wide-27, wide-28, wide-29, wide-30, wide-31, wide-32, wide-33, wide-34, wide-35, wide-36, wide-37, wide-38, wide-39, wide-40, wide-41, wide-42, wide-43, wide-44, wide-45, wide-46, wide-47, fast, titan, launch, liq, liqbot, carry, mm, xchain]
+        strategy: [dex, tri, lst, peg, cex, stock, stat, wide-0, wide-1, wide-2, wide-3, wide-4, wide-5, wide-6, wide-7, wide-8, wide-9, wide-10, wide-11, wide-12, wide-13, wide-14, wide-15, wide-16, wide-17, wide-18, wide-19, wide-20, wide-21, wide-22, wide-23, wide-24, wide-25, wide-26, wide-27, wide-28, wide-29, wide-30, wide-31, wide-32, wide-33, wide-34, wide-35, wide-36, wide-37, wide-38, wide-39, wide-40, wide-41, wide-42, wide-43, wide-44, wide-45, wide-46, wide-47, fast, titan, launch, liq, liqbot, carry, mm-SOL, mm-BTC, mm-ETH, mm-JUP, mm-BONK, xchain-base, xchain-arbitrum, xchain-ethereum, xchain-bsc]
     defaults:
       run:
         working-directory: solana-devnet/bot

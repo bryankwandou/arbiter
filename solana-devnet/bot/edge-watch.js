@@ -644,10 +644,11 @@ async function carry() {
 // through our quote fills it (no queue priority). Every requote costs one on-chain tx.
 // Proxy caveat: on-chain CLOB flow is thinner than CEX flow, so fills are optimistic.
 async function mm() {
+  const SYM = process.env.SHARD && isNaN(process.env.SHARD) ? process.env.SHARD : "SOL", INST = `${SYM}-USDT`;
   const HALF = [2, 5, 10, 20], SIZE = 100, CAP = 1000, REQUOTE_USD = Number(process.env.REQUOTE_USD || 0.001);
   const bk = Object.fromEntries(HALF.map((h) => [h, { bid: 0, ask: 0, at: 0, units: 0, cash: 0, vol: 0, fills: 0, gas: 0, bidOn: false, askOn: false }]));
   let mid = 0;
-  socket("wss://ws.okx.com:8443/ws/v5/public", (ws) => ws.send(JSON.stringify({ op: "subscribe", args: [{ channel: "bbo-tbt", instId: "SOL-USDT" }, { channel: "trades", instId: "SOL-USDT" }] })), (raw) => {
+  socket("wss://ws.okx.com:8443/ws/v5/public", (ws) => ws.send(JSON.stringify({ op: "subscribe", args: [{ channel: "bbo-tbt", instId: INST }, { channel: "trades", instId: INST }] })), (raw) => {
     const m = JSON.parse(raw); if (!m.data) return;
     if (m.arg.channel === "bbo-tbt") {
       const d = m.data[0]; mid = (+d.bids[0][0] + +d.asks[0][0]) / 2;
@@ -668,37 +669,45 @@ async function mm() {
   for (;;) {
     await sleep(Number(process.env.MM_EVERY || 600000));
     for (const h of HALF) {
-      const b = bk[h]; if (!b.vol || !mid) { console.log(`mm half-spread ${h}bps: no fills yet`); continue; }
+      const b = bk[h]; if (!b.vol || !mid) { console.log(`mm ${INST} half-spread ${h}bps: no fills yet`); continue; }
       const pnl = b.cash + b.units * mid; // marked to the current mid, so adverse selection shows
-      log("mm", `SOL-USDT half-spread ${h}bps`, Math.round(b.vol), (pnl / b.vol) * 1e4, (b.gas / b.vol) * 1e4,
+      log("mm", `${INST} half-spread ${h}bps`, Math.round(b.vol), (pnl / b.vol) * 1e4, (b.gas / b.vol) * 1e4,
         { fills: b.fills, inv_usd: Math.round(b.units * mid), gas_usd: +b.gas.toFixed(3), pnl_usd: +(pnl - b.gas).toFixed(3) });
     }
   }
 }
 
 // Cross-chain, pre-funded on both chains (slide model): buy on one chain, sell on the
-// other, rebalance later through deBridge DLN. Solana legs via Jupiter, Base legs via
-// KyberSwap; the bridge cost is a live DLN USDC Solana->Base quote at the same size.
+// other, rebalance later through deBridge DLN. Solana legs via Jupiter, EVM legs via
+// KyberSwap (its live gasUsd); the bridge cost is a live DLN USDC quote at the same size.
+// One chain per job: xchain-base, xchain-arbitrum, xchain-ethereum, xchain-bsc.
+const SOLX = { ETH: ["7vfCXTUXx5WJV5JADk17DUJ4ksgau7utNKj4b963voxs", 8], cbBTC: ["cbbtcf3aa214zXHbiAZQwf4122FBYbraNdFqgw4iMij", 8],
+  WBTC: ["3NZ9JMVBmGAqocybic2c7LQCJScmgsAZ6vQqTDzcqmJh", 8], BTCB: ["cbbtcf3aa214zXHbiAZQwf4122FBYbraNdFqgw4iMij", 8] };
+const EVM = { // chain: [DLN chain id, USDC, USDC decimals, { symbol: [address, decimals] }]
+  base: [8453, "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913", 6, { ETH: ["0x4200000000000000000000000000000000000006", 18], cbBTC: ["0xcbB7C0000aB88B473b1f5aFd9ef808440eed33Bf", 8] }],
+  arbitrum: [42161, "0xaf88d065e77c8cC2239327C5EDb3A432268e5831", 6, { ETH: ["0x82aF49447D8a07e3bd95BD0d56f35241523fBab1", 18], WBTC: ["0x2f2a2543B76A4166549F7aaB2e75Bef0aefC5B0f", 8] }],
+  ethereum: [1, "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48", 6, { ETH: ["0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2", 18], cbBTC: ["0xcbB7C0000aB88B473b1f5aFd9ef808440eed33Bf", 8], WBTC: ["0x2260FAC5E5542a773Aa44fBCfeDf7C193bc2C599", 8] }],
+  bsc: [56, "0x8AC76a51cc950d9822D68b83fE1Ad97B32Cd580d", 18, { ETH: ["0x2170Ed0880ac9A755fd29B2688956BD959F933F8", 18], BTCB: ["0x7130d2A12B9BCbFAe4f2634d864A1Ee1Ce3Ead9c", 18] }],
+};
 async function xchain() {
-  const USDC_B = "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913";
-  const X = { ETH: ["7vfCXTUXx5WJV5JADk17DUJ4ksgau7utNKj4b963voxs", 8, "0x4200000000000000000000000000000000000006", 18],
-              cbBTC: ["cbbtcf3aa214zXHbiAZQwf4122FBYbraNdFqgw4iMij", 8, "0xcbB7C0000aB88B473b1f5aFd9ef808440eed33Bf", 8] };
-  const kyber = async (a, b, amt) => BigInt((await get(`https://aggregator-api.kyberswap.com/base/api/v1/routes?tokenIn=${a}&tokenOut=${b}&amountIn=${amt}`)).data.routeSummary.amountOut);
+  const chain = EVM[process.env.SHARD] ? process.env.SHARD : "base", [id, usdc, ud, toks] = EVM[chain];
+  const kyber = async (a, b, amt) => (await get(`https://aggregator-api.kyberswap.com/${chain}/api/v1/routes?tokenIn=${a}&tokenOut=${b}&amountIn=${amt}`)).data.routeSummary;
   const jup = async (a, b, amt) => { await budget(1); return BigInt((await get(`${JUP}/quote?inputMint=${a}&outputMint=${b}&amount=${amt}&slippageBps=0`)).outAmount); };
+  const scale = (x, from, to) => (to >= from ? x * 10n ** BigInt(to - from) : x / 10n ** BigInt(from - to));
   for (;;) {
     for (const usd of [100, 1000, 10000]) {
       try {
-        const q = await get(`https://dln.debridge.finance/v1.0/dln/order/quote?srcChainId=7565164&srcChainTokenIn=${T.USDC[0]}&srcChainTokenInAmount=${usd * 1e6}&dstChainId=8453&dstChainTokenOut=${USDC_B}&prependOperatingExpenses=true`);
-        const e = q.estimation, bridge = (1 - (+e.dstChainTokenOut.amount) / (+e.srcChainTokenIn.amount)) * 1e4;
-        const gas = ((2 * TX_USD) / usd) * 1e4; // one Solana tx + one Base tx (Base gas ~ $0.01)
-        for (const [s, [sm, sd, bm, bd]] of Object.entries(X)) {
-          const amt = BigInt(usd * 1e6);
-          const solBuy = await jup(T.USDC[0], sm, amt), baseSell = await kyber(bm, USDC_B, solBuy * 10n ** BigInt(bd - sd));
-          log("xchain", `${s} buy Solana sell Base`, usd, (Number(baseSell) / usd / 1e6 - 1) * 1e4, bridge + gas, { bridge_bps: +bridge.toFixed(2) });
-          const baseBuy = await kyber(USDC_B, bm, amt), solSell = await jup(sm, T.USDC[0], baseBuy / 10n ** BigInt(bd - sd));
-          log("xchain", `${s} buy Base sell Solana`, usd, (Number(solSell) / usd / 1e6 - 1) * 1e4, bridge + gas, { bridge_bps: +bridge.toFixed(2) });
+        const e = (await get(`https://dln.debridge.finance/v1.0/dln/order/quote?srcChainId=7565164&srcChainTokenIn=${T.USDC[0]}&srcChainTokenInAmount=${usd * 1e6}&dstChainId=${id}&dstChainTokenOut=${usdc}&prependOperatingExpenses=true`)).estimation;
+        const bridge = (1 - e.dstChainTokenOut.approximateUsdValue / e.srcChainTokenIn.approximateUsdValue) * 1e4;
+        for (const [s, [ea, ed]] of Object.entries(toks)) {
+          const [sm, sd] = SOLX[s], amt = BigInt(usd) * 10n ** BigInt(ud);
+          const solBuy = await jup(T.USDC[0], sm, BigInt(usd * 1e6)), sell = await kyber(ea, usdc, scale(solBuy, sd, ed));
+          const outA = Number(BigInt(sell.amountOut) * 1000000n / 10n ** BigInt(ud)) / 1e6;
+          log("xchain", `${s} buy Solana sell ${chain}`, usd, (outA / usd - 1) * 1e4, bridge + ((TX_USD + +sell.gasUsd) / usd) * 1e4, { bridge_bps: +bridge.toFixed(2), evm_gas_usd: +(+sell.gasUsd).toFixed(4) });
+          const buy = await kyber(usdc, ea, amt), solSell = await jup(sm, T.USDC[0], scale(BigInt(buy.amountOut), ed, sd));
+          log("xchain", `${s} buy ${chain} sell Solana`, usd, (Number(solSell) / 1e6 / usd - 1) * 1e4, bridge + ((TX_USD + +buy.gasUsd) / usd) * 1e4, { bridge_bps: +bridge.toFixed(2), evm_gas_usd: +(+buy.gasUsd).toFixed(4) });
         }
-      } catch (e) { console.log(`xchain ${usd}: ${e.message}`); }
+      } catch (e) { console.log(`xchain ${chain} ${usd}: ${e.message}`); }
     }
     await sleep(120000);
   }
