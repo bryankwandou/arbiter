@@ -22,6 +22,7 @@
 //   liqbot dry-run MarginFi receivership liquidator on every account someone
 //          tried to liquidate: health, repay size, swap quote, net profit
 //   carry  funding-rate carry: long spot, short perp (Backpack, Hyperliquid, OKX)
+//   carrybot paper carry position from CARRY_START, funding from Hyperliquid history
 //   mm     paper market maker, Manifest fee model, OKX SOL-USDT flow as proxy
 //   xchain Solana vs Base (Jupiter / KyberSwap), deBridge DLN rebalance cost
 //
@@ -713,8 +714,34 @@ async function xchain() {
   }
 }
 
+// Paper carry position opened at a fixed time (CARRY_START): long spot + short Hyperliquid
+// perp of equal size. Stateless and reproducible: every run recomputes the funding paid
+// since the start from Hyperliquid's public fundingHistory, so anyone can re-check it.
+// PnL = funding received - round-trip fees + the change in perp premium (basis).
+async function carrybot() {
+  const START = Date.parse(process.env.CARRY_START || "2026-10-04T05:00:00Z"), FEES = 2 * 4.5 + 2 * 6;
+  const COINS = ["SOL", "BTC", "ETH", "HYPE"];
+  for (;;) {
+    try {
+      const [meta, ctx] = await post("https://api.hyperliquid.xyz/info", { type: "metaAndAssetCtxs" });
+      for (const coin of COINS) {
+        const rows = [];
+        for (let t = START; ;) { const r = await post("https://api.hyperliquid.xyz/info", { type: "fundingHistory", coin, startTime: t }); rows.push(...r); if (r.length < 500) break; t = r.at(-1).time + 1; }
+        if (!rows.length) { console.log(`carrybot ${coin}: no funding since start yet`); continue; }
+        const funding = rows.reduce((a, r) => a + +r.fundingRate, 0) * 1e4;
+        const c = ctx[meta.universe.findIndex((u) => u.name === coin)], premNow = +c.premium, premStart = +rows[0].premium;
+        const basis = (premStart - premNow) * 1e4; // short perp gains when its premium shrinks
+        const hours = rows.length;
+        for (const usd of [10, 1000]) log("carrybot", `${coin} since ${new Date(START).toISOString().slice(0, 13)}Z (${hours}h)`, usd, funding + basis, FEES,
+          { funding_bps: +funding.toFixed(2), basis_bps: +basis.toFixed(2), hours, pnl_usd: +((funding + basis - FEES) * usd / 1e4).toFixed(4) });
+      }
+    } catch (e) { console.log(`carrybot: ${e.message}`); }
+    await sleep(3600000);
+  }
+}
+
 const ROUND = { dex, tri, lst, peg, wide, cex, stock, stat };
-const WATCH = { fast, titan, launch, liq, liqbot, carry, mm, xchain };
+const WATCH = { fast, titan, launch, liq, liqbot, carry, carrybot, mm, xchain };
 
 function summary(files) {
   const all = files.filter((f) => existsSync(f)).flatMap((f) => readFileSync(f, "utf8").split("\n").filter(Boolean).map((l) => JSON.parse(l)));
