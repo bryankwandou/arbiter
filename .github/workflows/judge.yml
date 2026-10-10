@@ -1,0 +1,42 @@
+# Stop-rule verdict (agreed 2026-10-04): judge mm, xchain and liqbot on 2026-10-18,
+# carrybot alongside. Pulls every finished edge-watch run since 2026-10-07 and runs
+# judge.js on those artifacts; the verdict lands in this run's summary, and the
+# input files are kept as an artifact so anyone can re-run it and match the hash.
+# GitHub cron drops runs, so trigger it by hand if the scheduled one never shows:
+#   gh workflow run judge.yml -R bryankwandou/arbiter
+name: Stop-rule verdict
+
+on:
+  schedule:
+    - cron: "0 6 18 10 *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  judge:
+    if: github.repository == 'bryankwandou/arbiter'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Download edge-watch data
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          for id in $(gh run list -R "$GITHUB_REPOSITORY" -w edge-watch.yml -s success -L 100 --created ">=2026-10-07" --json databaseId -q '.[].databaseId'); do
+            gh run download "$id" -R "$GITHUB_REPOSITORY" -D "data/$id" -p "edge-mm-*" -p "edge-xchain-*" -p "edge-liqbot-*" -p "edge-carrybot-*" || echo "run $id: no artifacts"
+          done
+      - name: Verdict
+        run: node solana-devnet/bot/judge.js data/*/*/*.jsonl | tee -a "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: judge-input-${{ github.run_id }}
+          path: data
+          retention-days: 90
