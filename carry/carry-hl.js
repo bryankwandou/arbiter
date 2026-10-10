@@ -6,16 +6,21 @@
 //   node carry-hl.js status   <0xaccount> [--since 2026-10-18T00:00:00Z]  real PnL from public fills + funding
 //   node carry-hl.js open     [--live]   maker-first entry; without --live it only prints the actions
 //   node carry-hl.js close    [--live]
-//   node carry-hl.js watch    [--live]   every 10 min: status, and close both legs before the short nears liquidation
+//   node carry-hl.js watch    [--live]   every 10 min: status, and close both legs before the short nears liquidation;
+//                                        exits after 3 checks with no short open
 //   node carry-hl.js selftest            signs an order with a throwaway key; checks the signer the API recovers
 //
 // Live needs HL_ACCOUNT (the master address) and HL_AGENT_KEY (an API wallet approved in the
 // Hyperliquid app; it can trade but cannot withdraw). Both can sit in carry/.env (git-ignored).
 // CARRY_MAX_USD caps the spot buy (default 13).
+// --testnet (or HL_TESTNET=1) switches to Hyperliquid testnet: its own .env.testnet, API wallet and
+// ledger. Testnet books are thin and funding is 0, so it tests the mechanics, not the PnL.
 import { appendFileSync, readFileSync } from "node:fs";
-try { process.loadEnvFile(new URL("./.env", import.meta.url)); } catch { /* no .env: flags and shell env only */ }
+const TESTNET = process.argv.includes("--testnet") || process.env.HL_TESTNET === "1";
+try { process.loadEnvFile(new URL(TESTNET ? "./.env.testnet" : "./.env", import.meta.url)); } catch { /* no env file: flags and shell env only */ }
 
-const API = "https://api.hyperliquid.xyz";
+const API = TESTNET ? "https://api.hyperliquid-testnet.xyz" : "https://api.hyperliquid.xyz";
+const APP = TESTNET ? "https://app.hyperliquid-testnet.xyz" : "https://app.hyperliquid.xyz";
 const FEE = { perp: { taker: 4.5, maker: 1.5 }, spot: { taker: 7, maker: 4 } }; // bps, base tier (docs: trading/fees)
 const MIN_USD = 10; // API: "Order must have minimum value of $10"
 const args = process.argv.slice(2), cmd = args[0];
@@ -26,7 +31,7 @@ const LEV = Number(opt("lev", process.env.CARRY_LEV || 1));
 const MAX_USD = Number(process.env.CARRY_MAX_USD || 13);
 const LIVE = args.includes("--live");
 const TRIES = 6, WAIT_MS = 20000, SLIP = 0.002; // maker requotes, wait per quote, IOC fallback slippage
-const LEDGER = new URL("./carry-ledger.jsonl", import.meta.url);
+const LEDGER = new URL(TESTNET ? "./carry-ledger-testnet.jsonl" : "./carry-ledger.jsonl", import.meta.url);
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const record = (o) => appendFileSync(LEDGER, JSON.stringify({ t: new Date().toISOString(), ...o }) + "\n");
 
@@ -54,7 +59,14 @@ async function market(coin) {
   };
 }
 
-const top = async (book) => { const b = await info({ type: "l2Book", coin: book }); return { bid: b.levels[0][0].px, ask: b.levels[1][0].px }; };
+// Best bid/ask as the book prints them (already valid tick prices). A side may be empty on a thin
+// (testnet) book: `ask` then falls back to 0.1% over the bid, rounded with the leg's price rules.
+async function top(book, leg) {
+  const b = await info({ type: "l2Book", coin: book }), bid = b.levels[0][0]?.px, ask = b.levels[1][0]?.px;
+  if (!bid && !ask) throw new Error(`${book}: empty book`);
+  const fit = (px) => (leg ? fmtPx(px, leg) : String(px));
+  return { bid: bid ?? fit(+ask * 0.999), ask: ask ?? fit(+bid * 1.001) };
+}
 const wire = (x, d) => String(Number(Number(x).toFixed(d))); // no trailing zeros, as the signer hashes it
 const fmtPx = (px, leg) => wire(Number(px).toPrecision(5), (leg.spot ? 8 : 6) - leg.szDec); // 5 sig figs, max decimals
 const floorSz = (x, d) => Math.floor(x * 10 ** d + 1e-9) / 10 ** d;
@@ -74,7 +86,7 @@ async function fundingSince(coin, start) {
 }
 
 async function plan() {
-  const m = await market(COIN), [sp, pp] = await Promise.all([top(m.spot.book), top(m.perp.book)]);
+  const m = await market(COIN), [sp, pp] = await Promise.all([top(m.spot.book, m.spot), top(m.perp.book, m.perp)]);
   const { hedge, buy } = sizes(m, +sp.ask);
   const week = await fundingSince(COIN, Date.now() - 7 * 864e5);
   const perHour = (week.reduce((a, r) => a + +r.fundingRate, 0) / week.length) * 1e4;
@@ -124,7 +136,7 @@ async function status(user, since) {
   console.log(`| item | USD |\n|---|---|\n| funding received (${funding.length} payments) | ${r(fund)} |\n| fees paid | ${r(-fees)} |\n| spot leg price change | ${r(legs.spot.price_pnl)} |\n| perp leg price change | ${r(legs.perp.price_pnl)} |\n| **net** | **${r(net)}** (${out.net_bps == null ? "–" : out.net_bps.toFixed(2)} bps) |\n`);
   console.log(`traded in window: spot ${legs.spot.qty} ${m.spot.token} (before in-kind fees), perp ${legs.perp.qty} ${COIN}; live perp position ${szi}; ${out.fills} fills, ${out.maker_fills} maker`);
   if (Math.abs(szi - legs.perp.qty) > 10 ** -m.perp.szDec) console.log("NOTE: the perp position predates --since, so price change covers only trades in the window while funding covers the whole position");
-  console.log(`verify: https://app.hyperliquid.xyz/explorer/address/${user}`);
+  console.log(`verify: ${APP}/explorer/address/${user}`);
   record({ kind: "status", ...out });
   return out;
 }
@@ -135,7 +147,7 @@ async function exchange() {
   if (!KEY.test(process.env.HL_AGENT_KEY || "")) throw new Error("HL_AGENT_KEY is not a 0x private key (64 hex chars); fill it in carry/.env");
   const { ExchangeClient, HttpTransport } = await import("@nktkas/hyperliquid");
   const { privateKeyToAccount } = await import("viem/accounts");
-  return new ExchangeClient({ transport: new HttpTransport(), wallet: privateKeyToAccount(process.env.HL_AGENT_KEY) });
+  return new ExchangeClient({ transport: new HttpTransport({ isTestnet: TESTNET }), wallet: privateKeyToAccount(process.env.HL_AGENT_KEY) });
 }
 
 // Rest a post-only order at the touch; requote while nothing fills; cross the rest with IOC so a
@@ -145,7 +157,7 @@ async function work(ex, user, leg, isBuy, size, reduceOnly) {
   let left = size, filled = 0;
   const fillsOf = async (oid, t0) => { await sleep(1500); return (await info({ type: "userFillsByTime", user, startTime: t0 })).filter((f) => f.oid === oid).reduce((a, f) => a + +f.sz, 0); };
   for (let i = 0; i <= TRIES && left > 0; i++) {
-    const t = await top(leg.book), taker = i === TRIES, px = isBuy ? (taker ? +t.ask * (1 + SLIP) : t.bid) : (taker ? +t.bid * (1 - SLIP) : t.ask);
+    const t = await top(leg.book, leg), taker = i === TRIES, px = isBuy ? (taker ? +t.ask * (1 + SLIP) : t.bid) : (taker ? +t.bid * (1 - SLIP) : t.ask);
     if (left * +px < MIN_USD && !reduceOnly) { console.log(`  remainder ${left} is under $${MIN_USD}; stopping this leg`); break; }
     const o = { a: leg.asset, b: isBuy, p: taker ? fmtPx(px, leg) : px, s: wire(left, leg.szDec), r: reduceOnly, t: { limit: { tif: taker ? "Ioc" : "Alo" } } }, t0 = Date.now();
     let st;
@@ -178,7 +190,7 @@ async function preflight(m) {
 }
 
 async function open() {
-  const m = await market(COIN), t = await top(m.spot.book), sz = sizes(m, +t.ask);
+  const m = await market(COIN), t = await top(m.spot.book, m.spot), sz = sizes(m, +t.ask);
   const spotUsd = sz.buy * +t.ask, margin = (sz.hedge * +t.ask) / LEV;
   if (spotUsd > MAX_USD) throw new Error(`$${spotUsd.toFixed(2)} spot buy is above CARRY_MAX_USD=${MAX_USD}`);
   const st = await preflight(m);
@@ -205,7 +217,7 @@ async function close() {
   if (!st) return;
   // Sell back only the hedged amount, so other coins the account already held are left alone.
   const perpQty = Math.abs(st.perp_szi), spotQty = Math.min(floorSz(st.spot_base, m.spot.szDec), floorSz(perpQty, m.spot.szDec));
-  const bid = +(await top(m.spot.book)).bid;
+  const bid = +(await top(m.spot.book, m.spot)).bid;
   console.log(`close: buy back ${perpQty} ${COIN} perp (reduce-only), sell ${spotQty} ${m.spot.token} spot (~$${(spotQty * bid).toFixed(2)})`);
   if (spotQty && spotQty * bid < MIN_USD) throw new Error(`spot sale $${(spotQty * bid).toFixed(2)} is under the $${MIN_USD} minimum; closing the perp alone would leave the spot unhedged, so nothing was sent`);
   if (!LIVE) return console.log("dry run: add --live to send orders");
@@ -223,18 +235,24 @@ async function close() {
 async function watch() {
   const user = process.env.HL_ACCOUNT, guard = Number(process.env.CARRY_GUARD || 0.08), every = Number(process.env.CARRY_EVERY || 600000);
   if (!ADDR.test(user || "")) throw new Error("watch needs HL_ACCOUNT (a 0x address) in carry/.env");
-  for (let n = 0; ; n++) {
+  for (let n = 0, idle = 0; ; n++) {
     try {
       if (n % Math.max(1, Math.round(3600000 / every)) === 0) await status(user, since);
       const pos = (await info({ type: "clearinghouseState", user })).assetPositions.find((p) => p.position.coin === COIN)?.position;
-      if (!pos || +pos.szi >= 0) { console.log(`${new Date().toISOString()} no ${COIN} short open`); }
-      else if (pos.liquidationPx) {
+      if (!pos || +pos.szi >= 0) {
+        console.log(`${new Date().toISOString()} no ${COIN} short open`);
+        if (++idle >= 3) return console.log("nothing to guard after 3 checks; exiting"); // exit 0 also ends the CI chain
+      } else {
+        idle = 0;
         const mid = +(await info({ type: "allMids" }))[COIN], liq = +pos.liquidationPx, room = liq / mid - 1;
-        console.log(`${new Date().toISOString()} ${COIN} ${mid}, liquidation ${liq}, room ${(room * 100).toFixed(1)}%`);
-        if (room < guard) {
-          record({ kind: "guard", mid, liq, room });
-          console.log(`room under ${guard * 100}%: closing both legs${LIVE ? "" : " (dry run: add --live to act)"}`);
-          if (LIVE) { await close(); return; }
+        if (!pos.liquidationPx) console.log(`${new Date().toISOString()} ${COIN} short ${pos.szi} open, no liquidation price reported`);
+        else {
+          console.log(`${new Date().toISOString()} ${COIN} ${mid}, liquidation ${liq}, room ${(room * 100).toFixed(1)}%`);
+          if (room < guard) {
+            record({ kind: "guard", mid, liq, room });
+            console.log(`room under ${guard * 100}%: closing both legs${LIVE ? "" : " (dry run: add --live to act)"}`);
+            if (LIVE) { await close(); return; }
+          }
         }
       }
     } catch (e) { console.log(`watch: ${e.message}`); }
@@ -247,10 +265,10 @@ async function watch() {
 async function selftest() {
   const { ExchangeClient, HttpTransport } = await import("@nktkas/hyperliquid");
   const { privateKeyToAccount, generatePrivateKey } = await import("viem/accounts");
-  const wallet = privateKeyToAccount(generatePrivateKey()), m = await market(COIN), t = await top(m.perp.book);
+  const wallet = privateKeyToAccount(generatePrivateKey()), m = await market(COIN), t = await top(m.perp.book, m.perp);
   const px = fmtPx(+t.bid * 0.5, m.perp), sz = wire(Math.ceil((12 / +px) * 10 ** m.perp.szDec) / 10 ** m.perp.szDec, m.perp.szDec);
   try {
-    await new ExchangeClient({ transport: new HttpTransport(), wallet }).order({ orders: [{ a: m.perp.asset, b: true, p: px, s: sz, r: false, t: { limit: { tif: "Alo" } } }], grouping: "na" });
+    await new ExchangeClient({ transport: new HttpTransport({ isTestnet: TESTNET }), wallet }).order({ orders: [{ a: m.perp.asset, b: true, p: px, s: sz, r: false, t: { limit: { tif: "Alo" } } }], grouping: "na" });
     console.log("unexpected: order accepted");
   } catch (e) {
     const ok = e.message.toLowerCase().includes(wallet.address.toLowerCase());
@@ -263,6 +281,6 @@ async function selftest() {
 const lastOpen = () => { try { return readFileSync(LEDGER, "utf8").split("\n").filter(Boolean).map((l) => JSON.parse(l)).filter((r) => r.kind === "open_start").at(-1)?.t; } catch { return undefined; } };
 const sinceArg = opt("since", process.env.CARRY_SINCE), opened = lastOpen();
 const since = sinceArg ? Date.parse(sinceArg) : opened ? Date.parse(opened) - 60000 : Date.now() - 30 * 864e5;
-const run = { plan, status: () => status(args[1] || process.env.HL_ACCOUNT, since), open, close, watch, selftest }[cmd];
+const run = { plan, status: () => status(args.slice(1).find((a) => a.startsWith("0x")) || process.env.HL_ACCOUNT, since), open, close, watch, selftest }[cmd];
 if (!run) { console.log("usage: node carry-hl.js plan|status [0xaccount]|open [--live]|close [--live]|watch [--live]|selftest"); process.exit(1); }
 run().catch((e) => { console.error(`error: ${e.message}`); process.exitCode = 1; });

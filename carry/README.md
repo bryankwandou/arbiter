@@ -16,6 +16,25 @@ node carry-hl.js status 0xALAMAT --since 2026-10-18T00:00:00Z
 4. Klik dua kali `start-carry.bat`. Pertama kali, Notepad akan terbuka. Tempel alamat dompet ke `HL_ACCOUNT` dan private key API ke `HL_AGENT_KEY`, simpan, lalu jalankan `start-carry.bat` lagi.
 5. Rencana dan saldo akan tampil. Ketik `YA` untuk membuka posisi. Setelah itu penjaga likuidasi berjalan selama jendela tetap terbuka.
 
+## Uji di testnet dulu
+
+1. Faucet testnet (app.hyperliquid-testnet.xyz/drip, 1.000 USDC mainan) hanya untuk alamat yang **pernah deposit di mainnet** dengan alamat yang sama, minimal 5 USDC lewat Arbitrum. Devnet SOL dari Solana tidak bisa dipakai di sini.
+2. Buat API wallet di app.hyperliquid-testnet.xyz → More → API. API wallet testnet terpisah dari mainnet.
+3. Jalankan `start-carry.bat testnet`. Isi `.env.testnet`, lalu ubah `CARRY_USD=16` dan `CARRY_MAX_USD=20`. Spread spot HYPE di testnet sangat lebar, jadi dengan $12 nilai jual spot bisa jatuh di bawah $10.
+4. Testnet hanya menguji mekanik: order masuk, terisi, hedge terpasang, dan posisi bisa ditutup. Funding di testnet 0 dan harganya tidak nyata, jadi angka untung-rugi testnet tidak berarti.
+
+## Penjaga di GitHub Actions
+
+Workflow `carry-watch.yml` menjalankan `watch --live` sekitar 5 jam 40 menit per run, lalu memicu run berikutnya. Dengan begitu penjaga tetap jalan walaupun laptop mati. Pemilik akun mengisi:
+
+```
+gh variable set HL_ACCOUNT -R bryankwandou/arbiter
+gh secret set HL_AGENT_KEY -R bryankwandou/arbiter
+gh workflow run carry-watch.yml -R bryankwandou/arbiter
+```
+
+Untuk testnet, tambahkan `gh variable set HL_TESTNET -b 1 -R bryankwandou/arbiter`. Paket gratis hanya menjalankan 20 job sekaligus per akun. Selama edge-watch memakai slot itu, penjaga ikut mengantre dan tidak berjalan.
+
 ## Perintah
 
 | Perintah | Butuh kunci | Fungsi |

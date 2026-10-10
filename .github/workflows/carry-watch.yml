@@ -1,0 +1,91 @@
+# Liquidation guard for the live Hyperliquid carry position (carry/carry-hl.js watch --live).
+# Each run guards for ~5h40m, then dispatches the next one, so the guard keeps running while
+# the laptop is off. A run that finds no short open for 3 checks exits 0 and ends the chain.
+#
+# Needs, set by the account owner:
+#   variable HL_ACCOUNT   gh variable set HL_ACCOUNT -R bryankwandou/arbiter
+#   secret   HL_AGENT_KEY gh secret set HL_AGENT_KEY -R bryankwandou/arbiter   (API wallet: trades, cannot withdraw)
+#   optional variable HL_TESTNET=1 to guard a testnet position instead
+# Start: gh workflow run carry-watch.yml -R bryankwandou/arbiter
+# Stop:  gh workflow disable carry-watch.yml -R bryankwandou/arbiter
+#
+# The free plan runs 20 jobs at once per account; while edge-watch holds those slots this job
+# waits in the queue, and the guard is not running during that wait.
+name: Carry watch (live)
+
+on:
+  workflow_dispatch:
+    inputs:
+      chain:
+        description: Dispatch the next run when this one times out
+        default: "true"
+
+concurrency:
+  group: carry-watch
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  watch:
+    if: github.repository == 'bryankwandou/arbiter'
+    runs-on: ubuntu-latest
+    timeout-minutes: 350
+    outputs:
+      timed_out: ${{ steps.watch.outputs.timed_out }}
+    defaults:
+      run:
+        working-directory: carry
+    env:
+      HL_ACCOUNT: ${{ vars.HL_ACCOUNT }}
+      HL_AGENT_KEY: ${{ secrets.HL_AGENT_KEY }}
+      HL_TESTNET: ${{ vars.HL_TESTNET }}
+      CARRY_COIN: ${{ vars.CARRY_COIN || 'HYPE' }}
+      CARRY_SINCE: ${{ vars.CARRY_SINCE }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm ci --ignore-scripts
+      - name: Check config
+        run: |
+          [[ "$HL_ACCOUNT" =~ ^0x[0-9a-fA-F]{40}$ ]] || { echo "::error::variable HL_ACCOUNT is not set to a 0x address"; exit 1; }
+          [[ "$HL_AGENT_KEY" =~ ^0x[0-9a-fA-F]{64}$ ]] || { echo "::error::secret HL_AGENT_KEY is missing or malformed"; exit 1; }
+      - name: Watch
+        id: watch
+        run: |
+          set +e
+          timeout 340m node carry-hl.js watch --live
+          code=$?
+          echo "exit code $code"
+          if [ $code -eq 124 ]; then echo "timed_out=true" >> "$GITHUB_OUTPUT"; exit 0; fi
+          exit $code
+      - name: Ledger
+        if: always()
+        run: |
+          f=carry-ledger.jsonl; [ "$HL_TESTNET" = "1" ] && f=carry-ledger-testnet.jsonl
+          { echo '```'; tail -n 30 "$f" 2>/dev/null || echo "no ledger lines"; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: carry-ledger-${{ github.run_id }}
+          path: carry/carry-ledger*.jsonl
+          if-no-files-found: ignore
+          retention-days: 90
+
+  chain:
+    needs: watch
+    if: always() && needs.watch.outputs.timed_out == 'true' && inputs.chain != 'false'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      actions: write
+    steps:
+      - name: Dispatch next guard run
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh workflow run carry-watch.yml -R "$GITHUB_REPOSITORY" --ref "$GITHUB_REF_NAME"
