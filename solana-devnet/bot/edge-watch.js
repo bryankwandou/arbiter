@@ -719,7 +719,7 @@ async function xchain() {
 // since the start from Hyperliquid's public fundingHistory, so anyone can re-check it.
 // PnL = funding received - round-trip fees + the change in perp premium (basis).
 async function carrybot() {
-  const START = Date.parse(process.env.CARRY_START || "2026-10-04T05:00:00Z"), FEES = 2 * 4.5 + 2 * 6;
+  const START = Date.parse(process.env.CARRY_START || "2026-10-04T05:00:00Z"), FEES = 2 * 4.5 + 2 * 7; // Hyperliquid taker: perp 4.5, spot 7 bps (docs, base tier)
   const COINS = ["SOL", "BTC", "ETH", "HYPE"];
   for (;;) {
     try {
