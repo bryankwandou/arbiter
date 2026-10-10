@@ -1,0 +1,9 @@
+{
+  "name": "arbiter-carry-hl",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@nktkas/hyperliquid": "0.33.3",
+    "viem": "2.56.9"
+  }
+}
