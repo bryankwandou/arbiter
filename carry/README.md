@@ -2,7 +2,7 @@
 
 Beli HYPE spot dan short HYPE perp dengan ukuran sama di Hyperliquid, lalu kumpulkan funding. Harga naik atau turun tidak berpengaruh karena kedua kaki saling menutup. Hasilnya berasal dari funding dikurangi biaya.
 
-Semua fill dan pembayaran funding tercatat publik. Siapa pun (pengacara, notaris, hakim) bisa memeriksa hasilnya dari alamat akun saja, tanpa kunci:
+Semua fill dan pembayaran funding tercatat publik. Siapa pun bisa memeriksa hasilnya dari alamat akun saja, tanpa kunci:
 
 ```
 node carry-hl.js status 0xALAMAT --since 2026-10-18T00:00:00Z
@@ -31,4 +31,4 @@ node carry-hl.js status 0xALAMAT --since 2026-10-18T00:00:00Z
 
 - `selftest`: alamat yang dibaca Hyperliquid sama dengan alamat penanda tangan.
 - `status` pada akun carry publik 0x4fd0…12da: kaki spot dan perp saling menutup, funding ~2 bps/hari. Sesuai perhitungan.
-- Belum ada order sungguhan. Uji uang asli diputuskan pengguna dan pengacara (aturan berhenti: 18 Okt–1 Nov 2026).
+- Belum ada order sungguhan. Uji dengan uang asli hanya dijalankan atas keputusan pemilik akun.
