@@ -6,11 +6,14 @@
 //   node carry-hl.js status   <0xaccount> [--since 2026-10-18T00:00:00Z]  real PnL from public fills + funding
 //   node carry-hl.js open     [--live]   maker-first entry; without --live it only prints the actions
 //   node carry-hl.js close    [--live]
+//   node carry-hl.js watch    [--live]   every 10 min: status, and close both legs before the short nears liquidation
 //   node carry-hl.js selftest            signs an order with a throwaway key; checks the signer the API recovers
 //
 // Live needs HL_ACCOUNT (the master address) and HL_AGENT_KEY (an API wallet approved in the
-// Hyperliquid app; it can trade but cannot withdraw). CARRY_MAX_USD caps each leg (default 11).
-import { appendFileSync } from "node:fs";
+// Hyperliquid app; it can trade but cannot withdraw). Both can sit in carry/.env (git-ignored).
+// CARRY_MAX_USD caps the spot buy (default 13).
+import { appendFileSync, readFileSync } from "node:fs";
+try { process.loadEnvFile(new URL("./.env", import.meta.url)); } catch { /* no .env: flags and shell env only */ }
 
 const API = "https://api.hyperliquid.xyz";
 const FEE = { perp: { taker: 4.5, maker: 1.5 }, spot: { taker: 7, maker: 4 } }; // bps, base tier (docs: trading/fees)
@@ -126,8 +129,10 @@ async function status(user, since) {
   return out;
 }
 
+const ADDR = /^0x[0-9a-fA-F]{40}$/, KEY = /^0x[0-9a-fA-F]{64}$/;
 async function exchange() {
-  if (!process.env.HL_AGENT_KEY || !process.env.HL_ACCOUNT) throw new Error("live needs HL_ACCOUNT and HL_AGENT_KEY");
+  if (!ADDR.test(process.env.HL_ACCOUNT || "")) throw new Error("HL_ACCOUNT is not a 0x address (40 hex chars); fill it in carry/.env");
+  if (!KEY.test(process.env.HL_AGENT_KEY || "")) throw new Error("HL_AGENT_KEY is not a 0x private key (64 hex chars); fill it in carry/.env");
   const { ExchangeClient, HttpTransport } = await import("@nktkas/hyperliquid");
   const { privateKeyToAccount } = await import("viem/accounts");
   return new ExchangeClient({ transport: new HttpTransport(), wallet: privateKeyToAccount(process.env.HL_AGENT_KEY) });
@@ -162,7 +167,8 @@ async function work(ex, user, leg, isBuy, size, reduceOnly) {
 
 async function preflight(m) {
   const user = process.env.HL_ACCOUNT;
-  if (!user) return console.log("(set HL_ACCOUNT to check balances)");
+  if (!user || user === "0x") return console.log("(set HL_ACCOUNT to check balances)");
+  if (!ADDR.test(user)) throw new Error("HL_ACCOUNT is not a 0x address (40 hex chars); fill it in carry/.env");
   const [spot, perp] = await Promise.all([info({ type: "spotClearinghouseState", user }), info({ type: "clearinghouseState", user })]);
   const usdc = spot.balances.find((b) => b.coin === "USDC"), base = spot.balances.find((b) => b.coin === m.spot.token);
   const pos = perp.assetPositions.find((p) => p.position.coin === COIN)?.position;
@@ -211,6 +217,31 @@ async function close() {
   console.log(`close done: perp bought back ${bought}, spot sold ${sold}`);
 }
 
+// Every CARRY_EVERY ms: check how far the short is from its liquidation price; once per hour also
+// record status. When the room drops under CARRY_GUARD (default 8%), close both legs (with --live)
+// so the hedge is unwound at market instead of liquidated with Hyperliquid's liquidation fee.
+async function watch() {
+  const user = process.env.HL_ACCOUNT, guard = Number(process.env.CARRY_GUARD || 0.08), every = Number(process.env.CARRY_EVERY || 600000);
+  if (!ADDR.test(user || "")) throw new Error("watch needs HL_ACCOUNT (a 0x address) in carry/.env");
+  for (let n = 0; ; n++) {
+    try {
+      if (n % Math.max(1, Math.round(3600000 / every)) === 0) await status(user, since);
+      const pos = (await info({ type: "clearinghouseState", user })).assetPositions.find((p) => p.position.coin === COIN)?.position;
+      if (!pos || +pos.szi >= 0) { console.log(`${new Date().toISOString()} no ${COIN} short open`); }
+      else if (pos.liquidationPx) {
+        const mid = +(await info({ type: "allMids" }))[COIN], liq = +pos.liquidationPx, room = liq / mid - 1;
+        console.log(`${new Date().toISOString()} ${COIN} ${mid}, liquidation ${liq}, room ${(room * 100).toFixed(1)}%`);
+        if (room < guard) {
+          record({ kind: "guard", mid, liq, room });
+          console.log(`room under ${guard * 100}%: closing both legs${LIVE ? "" : " (dry run: add --live to act)"}`);
+          if (LIVE) { await close(); return; }
+        }
+      }
+    } catch (e) { console.log(`watch: ${e.message}`); }
+    await sleep(every);
+  }
+}
+
 // Free check that signing is right: an order signed by a fresh key comes back as
 // "User or API Wallet 0x... does not exist", naming the address the API recovered.
 async function selftest() {
@@ -228,7 +259,10 @@ async function selftest() {
   }
 }
 
-const since = Date.parse(opt("since", process.env.CARRY_SINCE || "2026-10-18T00:00:00Z"));
-const run = { plan, status: () => status(args[1], since), open, close, selftest }[cmd];
-if (!run) { console.log("usage: node carry-hl.js plan|status <0xaccount>|open [--live]|close [--live]|selftest"); process.exit(1); }
+// Window for status: --since / CARRY_SINCE, else a minute before the last open in the ledger, else 30 days.
+const lastOpen = () => { try { return readFileSync(LEDGER, "utf8").split("\n").filter(Boolean).map((l) => JSON.parse(l)).filter((r) => r.kind === "open_start").at(-1)?.t; } catch { return undefined; } };
+const sinceArg = opt("since", process.env.CARRY_SINCE), opened = lastOpen();
+const since = sinceArg ? Date.parse(sinceArg) : opened ? Date.parse(opened) - 60000 : Date.now() - 30 * 864e5;
+const run = { plan, status: () => status(args[1] || process.env.HL_ACCOUNT, since), open, close, watch, selftest }[cmd];
+if (!run) { console.log("usage: node carry-hl.js plan|status [0xaccount]|open [--live]|close [--live]|watch [--live]|selftest"); process.exit(1); }
 run().catch((e) => { console.error(`error: ${e.message}`); process.exitCode = 1; });

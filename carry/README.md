@@ -8,6 +8,14 @@ Semua fill dan pembayaran funding tercatat publik. Siapa pun bisa memeriksa hasi
 node carry-hl.js status 0xALAMAT --since 2026-10-18T00:00:00Z
 ```
 
+## Cara mulai (pemilik dana)
+
+1. Buka app.hyperliquid.xyz, sambungkan dompet, lalu deposit sekitar $19–20 USDC. Untuk akun dompet, USDC masuk lewat Arbitrum, minimal 5 USDC.
+2. Pindahkan sekitar $12,7 ke saldo spot dan biarkan sekitar $6 di perp.
+3. Buka menu **More → API** dan buat API wallet. Simpan private key-nya. Kunci ini bisa trading, tapi tidak bisa menarik dana.
+4. Klik dua kali `start-carry.bat`. Pertama kali, Notepad akan terbuka. Tempel alamat dompet ke `HL_ACCOUNT` dan private key API ke `HL_AGENT_KEY`, simpan, lalu jalankan `start-carry.bat` lagi.
+5. Rencana dan saldo akan tampil. Ketik `YA` untuk membuka posisi. Setelah itu penjaga likuidasi berjalan selama jendela tetap terbuka.
+
 ## Perintah
 
 | Perintah | Butuh kunci | Fungsi |
@@ -16,6 +24,7 @@ node carry-hl.js status 0xALAMAT --since 2026-10-18T00:00:00Z
 | `status 0xALAMAT` | tidak | profit/rugi asli dari data publik |
 | `open` / `close` | tidak (dry run) | menampilkan order yang akan dikirim |
 | `open --live` / `close --live` | ya | mengirim order sungguhan |
+| `watch` / `watch --live` | ya untuk `--live` | cek tiap 10 menit, catat status tiap jam, tutup kedua kaki bila short tinggal <8% dari harga likuidasi |
 | `selftest` | tidak | memastikan tanda tangan order benar (kunci sekali pakai, tanpa dana) |
 
 ## Pengaman
@@ -31,4 +40,5 @@ node carry-hl.js status 0xALAMAT --since 2026-10-18T00:00:00Z
 
 - `selftest`: alamat yang dibaca Hyperliquid sama dengan alamat penanda tangan.
 - `status` pada akun carry publik 0x4fd0…12da: kaki spot dan perp saling menutup, funding ~2 bps/hari. Sesuai perhitungan.
+- `watch` (dry run) pada akun yang sama: membaca harga likuidasi, dan dengan ambang yang sengaja diketatkan, memicu penutupan.
 - Belum ada order sungguhan. Uji dengan uang asli hanya dijalankan atas keputusan pemilik akun.
