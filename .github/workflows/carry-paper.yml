@@ -1,0 +1,24 @@
+# Daily paper carry result (carry/paper.mjs). One job, under a minute, no secrets, no orders.
+# The result is in the run's summary page.
+name: Carry paper (daily)
+
+on:
+  schedule:
+    - cron: "17 6 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  paper:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: node carry/paper.mjs
