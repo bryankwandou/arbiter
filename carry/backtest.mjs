@@ -1,7 +1,16 @@
 // Carry backtest from public Hyperliquid funding history (no key): every hourly start in the last DAYS days,
 // hold 7/14/30/60 days, net = funding sum - fees (23 taker, 11 maker bps). Run: node carry/backtest.mjs
 const DAYS = 180, now = Date.now(), start = now - DAYS * 864e5;
-const post = b => fetch('https://api.hyperliquid.xyz/info', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(b) }).then(r => r.json());
+// Retries when the API rate-limits (HTTP 429, or a null body), e.g. when several scripts run at once.
+async function post(b) {
+  for (let i = 0; ; i++) {
+    const r = await fetch('https://api.hyperliquid.xyz/info', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(b) });
+    const a = r.ok ? await r.json() : null;
+    if (Array.isArray(a)) return a;
+    if (i === 5) throw new Error(`${b.coin}: HTTP ${r.status} after 6 tries`);
+    await new Promise(res => setTimeout(res, 2000 * (i + 1)));
+  }
+}
 const out = {};
 for (const coin of ['BTC', 'ETH', 'SOL', 'HYPE']) {
   let t = start, rows = [];
